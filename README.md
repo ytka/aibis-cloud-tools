@@ -27,11 +27,25 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ### 2. APIキーの設定
 
-[Aivis Cloud API ダッシュボード](https://hub.aivis-project.com/cloud-api/api-keys) からAPIキーを取得し、環境変数で設定：
+[Aivis Cloud API ダッシュボード](https://hub.aivis-project.com/cloud-api/api-keys) からAPIキーを取得し、以下のいずれかの方法で設定：
+
+#### 方法1: .envファイルを使用（推奨）
+
+```bash
+# .env.example をコピーして .env ファイルを作成
+cp .env.example .env
+
+# .env ファイルでAPIキーを設定
+echo "AIVIS_API_KEY=your_api_key_here" > .env
+```
+
+#### 方法2: 環境変数で設定
 
 ```bash
 export AIVIS_API_KEY="your_api_key_here"
 ```
+
+**注意**: `.env` ファイルは Git に含まれません（`.gitignore` で除外）。APIキーを安全に管理できます。
 
 ## 使用方法
 

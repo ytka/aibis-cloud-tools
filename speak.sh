@@ -13,6 +13,12 @@ NC='\033[0m' # No Color
 # 設定
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TTS_SCRIPT="${SCRIPT_DIR}/aivis-cloud-tts.py"
+
+# .envファイルが存在する場合は読み込み
+if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+    source "${SCRIPT_DIR}/.env"
+fi
+
 API_KEY="${AIVIS_API_KEY:-}"
 
 # ログ関数

@@ -7,8 +7,13 @@ set -x  # デバッグモード有効
 # 設定
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TTS_SCRIPT="${SCRIPT_DIR}/aivis-cloud-tts.py"
-API_KEY="${AIV
-IS_API_KEY:-}"
+
+# .envファイルが存在する場合は読み込み
+if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+    source "${SCRIPT_DIR}/.env"
+fi
+
+API_KEY="${AIVIS_API_KEY:-}"
 
 echo "=== デバッグ情報 ==="
 echo "SCRIPT_DIR: ${SCRIPT_DIR}"

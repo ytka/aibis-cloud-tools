@@ -12,6 +12,12 @@ NC='\033[0m' # No Color
 
 # 設定
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# .envファイルが存在する場合は読み込み
+if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+    source "${SCRIPT_DIR}/.env"
+fi
+
 API_KEY="${AIVIS_API_KEY:-}"
 MAX_CHARS=2000  # 1回あたりの最大文字数
 
