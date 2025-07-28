@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aivis-cloud-tts"
+version = "1.0.0"
+description = "Aivis Cloud API を使用した音声合成・再生ツール"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "aivis-cloud-tts", email = "example@example.com" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.28.0",
+    "mcp[cli]>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "isort>=5.10",
+    "flake8>=4.0",
+]
+
+[project.scripts]
+aivis-tts = "aivis_cloud_tts:main"
+aivis-mcp-server = "mcp_tts_server:main"
+
+[project.urls]
+Homepage = "https://github.com/aivis-project/aivis-cloud-tts"
+Repository = "https://github.com/aivis-project/aivis-cloud-tts"
+Documentation = "https://github.com/aivis-project/aivis-cloud-tts#readme"
+"Bug Tracker" = "https://github.com/aivis-project/aivis-cloud-tts/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
