@@ -212,7 +212,16 @@ execute_split_tts() {
         
         # speak.shへのオプション構築
         local speak_args=("$chunk_file")
-        [[ -n "$model_uuid" ]] && speak_args+=(-m "$model_uuid")
+        
+        # モデル指定: コマンドライン > 環境変数の優先順位
+        local effective_model=""
+        if [[ -n "$model_uuid" ]]; then
+            effective_model="$model_uuid"
+        elif [[ -n "${AIVIS_DEFAULT_MODEL_UUID:-}" ]]; then
+            effective_model="${AIVIS_DEFAULT_MODEL_UUID}"
+        fi
+        [[ -n "$effective_model" ]] && speak_args+=(-m "$effective_model")
+        
         [[ "$intensity" != "1.0" ]] && speak_args+=(-i "$intensity")
         [[ "$volume" != "1.0" ]] && speak_args+=(-v "$volume")
         

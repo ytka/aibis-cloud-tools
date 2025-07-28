@@ -277,7 +277,15 @@ execute_tts() {
     [[ "$rate" != "1.0" ]] && cmd_args+=(--rate "$rate")
     [[ "$intensity" != "1.0" ]] && cmd_args+=(--intensity "$intensity")
     [[ "$volume" != "1.0" ]] && cmd_args+=(--volume "$volume")
-    [[ -n "$model_uuid" ]] && cmd_args+=(--model-uuid "$model_uuid")
+    
+    # モデル指定: コマンドライン > 環境変数の優先順位
+    local effective_model=""
+    if [[ -n "$model_uuid" ]]; then
+        effective_model="$model_uuid"
+    elif [[ -n "${AIVIS_DEFAULT_MODEL_UUID:-}" ]]; then
+        effective_model="${AIVIS_DEFAULT_MODEL_UUID}"
+    fi
+    [[ -n "$effective_model" ]] && cmd_args+=(--model-uuid "$effective_model")
     [[ "$format" != "mp3" ]] && cmd_args+=(--format "$format")
     [[ "$no_play" == true ]] && cmd_args+=(--no-play)
     [[ "$realtime" == true ]] && cmd_args+=(--realtime)

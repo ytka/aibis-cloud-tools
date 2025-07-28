@@ -36,10 +36,17 @@ echo "文字数: $(wc -c < "$1")"
 echo "==================="
 
 # TTS コマンド実行
+# デフォルトモデルがあれば使用
+MODEL_ARGS=""
+if [[ -n "${AIVIS_DEFAULT_MODEL_UUID:-}" ]]; then
+    MODEL_ARGS="--model-uuid ${AIVIS_DEFAULT_MODEL_UUID}"
+    echo "使用モデル: ${AIVIS_DEFAULT_MODEL_UUID}"
+fi
+
 if command -v uv &> /dev/null && [[ -f "${SCRIPT_DIR}/pyproject.toml" ]]; then
     echo "UV環境で実行"
-    AIVIS_API_KEY="$API_KEY" uv run --directory "${SCRIPT_DIR}" aivis-cloud-tts.py --text-file "$1"
+    AIVIS_API_KEY="$API_KEY" uv run --directory "${SCRIPT_DIR}" aivis-cloud-tts.py --text-file "$1" $MODEL_ARGS
 else
     echo "直接Python実行"
-    AIVIS_API_KEY="$API_KEY" python3 "${TTS_SCRIPT}" --text-file "$1"
+    AIVIS_API_KEY="$API_KEY" python3 "${TTS_SCRIPT}" --text-file "$1" $MODEL_ARGS
 fi
