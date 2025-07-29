@@ -12,10 +12,11 @@ NC='\033[0m' # No Color
 
 # 設定
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # .envファイルが存在する場合は読み込み
-if [[ -f "${SCRIPT_DIR}/.env" ]]; then
-    source "${SCRIPT_DIR}/.env"
+if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+    source "${PROJECT_ROOT}/.env"
 fi
 
 API_KEY="${AIVIS_API_KEY:-}"
@@ -226,7 +227,7 @@ execute_split_tts() {
         [[ "$volume" != "1.0" ]] && speak_args+=(-v "$volume")
         
         while [[ $chunk_retry_count -lt $max_chunk_retries ]] && [[ "$retry_success" == false ]]; do
-            if AIVIS_API_KEY="$API_KEY" ./speak.sh "${speak_args[@]}"; then
+            if AIVIS_API_KEY="$API_KEY" "${SCRIPT_DIR}/speak.sh" "${speak_args[@]}"; then
                 ((success_count++))
                 log_success "[$i/$chunk_count] 完了"
                 retry_success=true

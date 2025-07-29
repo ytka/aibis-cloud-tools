@@ -70,49 +70,65 @@ AIVIS_DEFAULT_MODEL_UUID=e9339137-2ae3-4d41-9394-fb757a7e61e6  # mai
 
 ```bash
 # テキストから音声合成
-uv run aivis-cloud-tts.py --text "こんにちは、世界！"
+uv run src/aivis-cloud-tts.py --text "こんにちは、世界！"
 
 # テキストファイルから音声合成
-uv run aivis-cloud-tts.py --text-file example.txt
+uv run src/aivis-cloud-tts.py --text-file examples/sample.txt
 
 # 音声ファイルとして保存
-uv run aivis-cloud-tts.py --text "こんにちは" --save-file output.mp3
+uv run src/aivis-cloud-tts.py --text "こんにちは" --save-file output.mp3
 
 # リアルタイムストリーミング再生
-uv run aivis-cloud-tts.py --text-file example.txt --realtime
+uv run src/aivis-cloud-tts.py --text-file examples/sample.txt --realtime
 
 # パラメータ調整
-uv run aivis-cloud-tts.py --text "感情豊かに話します" \
+uv run src/aivis-cloud-tts.py --text "感情豊かに話します" \
   --rate 1.2 \
   --intensity 1.5 \
   --volume 1.0 \
   --format mp3
 
 # モデル一覧表示
-uv run aivis-cloud-tts.py --list-models
+uv run src/aivis-cloud-tts.py --list-models
+```
+
+### シェルスクリプト
+
+便利なシェルスクリプトが用意されています：
+
+```bash
+# 簡単な音声合成
+scripts/speak.sh "こんにちは"
+scripts/speak.sh examples/sample.txt
+
+# 長いテキストの分割読み上げ
+scripts/speak_long.sh examples/sample.txt
+
+# デバッグ用スクリプト
+scripts/debug_speak.sh examples/sample.txt
 ```
 
 ### MCPサーバー
 
 ```bash
 # MCPサーバー起動
-uv run run_mcp_server.py
+uv run src/run_mcp_server.py
 
 # デバッグモード（詳細ログ出力）
-MCP_DEBUG=true uv run run_mcp_server.py
+MCP_DEBUG=true uv run src/run_mcp_server.py
 ```
 
 ### mcp tools との連携
 
 ```bash
 # ツール一覧表示
-mcp tools uv run --directory /path/to/project run_mcp_server.py
+mcp tools uv run --directory /path/to/project src/run_mcp_server.py
 
 # 音声合成実行（同期モード）
-mcp call speak --params '{"text":"こんにちは"}' uv run --directory /path/to/project run_mcp_server.py
+mcp call speak --params '{"text":"こんにちは"}' uv run --directory /path/to/project src/run_mcp_server.py
 
 # 音声合成実行（非同期モード）
-mcp call speak --params '{"text":"こんにちは","async_mode":true}' uv run --directory /path/to/project run_mcp_server.py
+mcp call speak --params '{"text":"こんにちは","async_mode":true}' uv run --directory /path/to/project src/run_mcp_server.py
 ```
 
 ## MCPサーバーのパラメータ
@@ -148,7 +164,7 @@ notepad %APPDATA%\Claude\claude_desktop_config.json
         "run",
         "--directory",
         "/path/to/your/project/directory",
-        "run_mcp_server.py"
+        "src/run_mcp_server.py"
       ],
       "env": {
         "AIVIS_API_KEY": "your_actual_api_key_here"
@@ -185,9 +201,25 @@ Claude Desktop で以下のように依頼できます：
 
 ## ファイル構成
 
-- `aivis-cloud-tts.py`: メイン TTS スクリプト
-- `run_mcp_server.py`: MCP サーバー（公式フレームワーク使用）
-- `pyproject.toml`: uv 設定ファイル
+```
+aibis-cloud-tools/
+├── src/                    # メインソースコード
+│   ├── aivis-cloud-tts.py # メイン TTS スクリプト
+│   └── run_mcp_server.py  # MCP サーバー（公式フレームワーク使用）
+├── scripts/               # シェルスクリプト群
+│   ├── speak.sh          # 簡単読み上げスクリプト
+│   ├── speak_long.sh     # 長文分割読み上げスクリプト
+│   └── debug_speak.sh    # デバッグ用スクリプト
+├── examples/              # 使用例・サンプルファイル
+│   └── sample.txt        # サンプルテキストファイル
+├── tests/                 # テストファイル
+│   └── test_mcp.sh       # MCPサーバーテストスクリプト
+├── docs/                  # ドキュメント
+├── tmp/                   # 一時ファイル
+├── .env.example          # 環境変数テンプレート
+├── pyproject.toml        # uv 設定ファイル
+└── README.md             # このファイル
+```
 
 ## 対応音声フォーマット
 

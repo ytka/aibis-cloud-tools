@@ -6,11 +6,12 @@ set -x  # デバッグモード有効
 
 # 設定
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TTS_SCRIPT="${SCRIPT_DIR}/aivis-cloud-tts.py"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TTS_SCRIPT="${PROJECT_ROOT}/src/aivis-cloud-tts.py"
 
 # .envファイルが存在する場合は読み込み
-if [[ -f "${SCRIPT_DIR}/.env" ]]; then
-    source "${SCRIPT_DIR}/.env"
+if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+    source "${PROJECT_ROOT}/.env"
 fi
 
 API_KEY="${AIVIS_API_KEY:-}"
@@ -43,9 +44,9 @@ if [[ -n "${AIVIS_DEFAULT_MODEL_UUID:-}" ]]; then
     echo "使用モデル: ${AIVIS_DEFAULT_MODEL_UUID}"
 fi
 
-if command -v uv &> /dev/null && [[ -f "${SCRIPT_DIR}/pyproject.toml" ]]; then
+if command -v uv &> /dev/null && [[ -f "${PROJECT_ROOT}/pyproject.toml" ]]; then
     echo "UV環境で実行"
-    AIVIS_API_KEY="$API_KEY" uv run --directory "${SCRIPT_DIR}" aivis-cloud-tts.py --text-file "$1" $MODEL_ARGS
+    AIVIS_API_KEY="$API_KEY" uv run --directory "${PROJECT_ROOT}" src/aivis-cloud-tts.py --text-file "$1" $MODEL_ARGS
 else
     echo "直接Python実行"
     AIVIS_API_KEY="$API_KEY" python3 "${TTS_SCRIPT}" --text-file "$1" $MODEL_ARGS

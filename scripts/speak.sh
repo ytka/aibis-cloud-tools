@@ -12,11 +12,12 @@ NC='\033[0m' # No Color
 
 # 設定
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TTS_SCRIPT="${SCRIPT_DIR}/aivis-cloud-tts.py"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TTS_SCRIPT="${PROJECT_ROOT}/src/aivis-cloud-tts.py"
 
 # .envファイルが存在する場合は読み込み
-if [[ -f "${SCRIPT_DIR}/.env" ]]; then
-    source "${SCRIPT_DIR}/.env"
+if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+    source "${PROJECT_ROOT}/.env"
 fi
 
 API_KEY="${AIVIS_API_KEY:-}"
@@ -186,9 +187,9 @@ run_tts_command_with_retry() {
         local temp_error=$(mktemp)
         
         # TTS実行
-        if command -v uv &> /dev/null && [[ -f "${SCRIPT_DIR}/pyproject.toml" ]]; then
+        if command -v uv &> /dev/null && [[ -f "${PROJECT_ROOT}/pyproject.toml" ]]; then
             # UV環境で実行
-            AIVIS_API_KEY="$API_KEY" uv run --directory "${SCRIPT_DIR}" aivis-cloud-tts.py "$@" > "$temp_output" 2> "$temp_error"
+            AIVIS_API_KEY="$API_KEY" uv run --directory "${PROJECT_ROOT}" src/aivis-cloud-tts.py "$@" > "$temp_output" 2> "$temp_error"
             exit_code=$?
         else
             # 直接実行
@@ -231,9 +232,9 @@ run_tts_command_with_retry() {
 
 # TTS コマンド実行（後方互換用）
 run_tts_command() {
-    if command -v uv &> /dev/null && [[ -f "${SCRIPT_DIR}/pyproject.toml" ]]; then
+    if command -v uv &> /dev/null && [[ -f "${PROJECT_ROOT}/pyproject.toml" ]]; then
         # UV環境で実行
-        uv run --directory "${SCRIPT_DIR}" aivis-cloud-tts.py "$@"
+        uv run --directory "${PROJECT_ROOT}" src/aivis-cloud-tts.py "$@"
     else
         # 直接実行
         python3 "${TTS_SCRIPT}" "$@"
