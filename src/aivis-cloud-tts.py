@@ -388,6 +388,61 @@ def load_env_file():
             print(f"⚠️  .envファイル読み込みエラー: {e}")
 
 
+def split_text_smart(text, max_chars=2000):
+    """テキストを賢く分割する（文章境界を考慮）"""
+    if len(text) <= max_chars:
+        return [text]
+    
+    chunks = []
+    current_chunk = ""
+    
+    # 文単位で分割（。！？で終わる文を優先）
+    sentences = []
+    temp_sentence = ""
+    
+    for char in text:
+        temp_sentence += char
+        if char in '。！？\n':
+            sentences.append(temp_sentence.strip())
+            temp_sentence = ""
+    
+    # 残りがあれば追加
+    if temp_sentence.strip():
+        sentences.append(temp_sentence.strip())
+    
+    # 文をチャンクに結合
+    for sentence in sentences:
+        # 文が長すぎる場合は強制分割
+        if len(sentence) > max_chars:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+                current_chunk = ""
+            
+            # 長すぎる文を強制分割
+            while len(sentence) > max_chars:
+                chunks.append(sentence[:max_chars])
+                sentence = sentence[max_chars:]
+            
+            if sentence:
+                current_chunk = sentence
+        
+        # 文を追加してもmax_charsを超えない場合
+        elif len(current_chunk + sentence) <= max_chars:
+            current_chunk += sentence
+        
+        # 超える場合は現在のチャンクを確定して新しいチャンクを開始
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = sentence
+    
+    # 最後のチャンクを追加
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    
+    return chunks
+
+
 def get_default_model():
     """デフォルトの音声合成モデルUUIDを返す"""
     # openapi.json の例で使用されているモデル
@@ -426,6 +481,12 @@ def main():
     parser.add_argument("--no-play", action="store_true", help="音声を再生しない")
     parser.add_argument("--realtime", action="store_true", help="リアルタイムストリーミング再生を有効にする")
     parser.add_argument("--no-wait", action="store_true", help="音声再生の終了を待たない（バックグラウンド再生）")
+    
+    # 長いテキスト分割オプション
+    parser.add_argument("--max-chars", type=int, default=2000,
+                       help="長いテキストの分割単位（デフォルト: 2000文字）")
+    parser.add_argument("--split-pause", type=float, default=0,
+                       help="分割間の一時停止秒数（デフォルト: 0秒）")
     parser.add_argument("--list-models", action="store_true", help="利用可能なモデル一覧を表示")
 
     args = parser.parse_args()
@@ -457,6 +518,14 @@ def main():
                 sys.exit(1)
         else:
             text_content = args.text
+        
+        # 長いテキストの分割処理
+        text_chunks = split_text_smart(text_content, args.max_chars)
+        
+        if len(text_chunks) > 1:
+            print(f"📝 テキストを{len(text_chunks)}個のチャンクに分割しました（{args.max_chars}文字単位）")
+            if args.split_pause > 0:
+                print(f"⏸️  分割間隔: {args.split_pause}秒")
 
         # モデル一覧表示
         if args.list_models:
@@ -474,51 +543,63 @@ def main():
         print(f"合成対象テキスト（{len(text_content)}文字）:")
         print(f"「{text_content[:100]}{'...' if len(text_content) > 100 else ''}」")
         
-        # 音声合成
+        # 音声合成（チャンク処理）
         print("音声を合成中...")
         
-        if args.realtime and not args.no_play:
-            # リアルタイムストリーミング再生
-            audio_data = client.synthesize_and_stream(
-                text=text_content,
-                model_uuid=args.model_uuid,
-                speaker_uuid=args.speaker_uuid,
-                style_name=args.style_name,
-                output_format=args.format,
-                speaking_rate=args.rate,
-                emotional_intensity=args.intensity,
-                volume=args.volume,
-                save_file=args.save_file,
-                enable_realtime_play=True,
-                no_wait=args.no_wait
-            )
-        else:
-            # 従来の方式（全データ受信後に再生）
-            audio_data = client.synthesize_speech(
-                text=text_content,
-                model_uuid=args.model_uuid,
-                speaker_uuid=args.speaker_uuid,
-                style_name=args.style_name,
-                output_format=args.format,
-                speaking_rate=args.rate,
-                emotional_intensity=args.intensity,
-                volume=args.volume
-            )
+        # チャンクごとに処理
+        total_audio_data = b""
+        for i, chunk_text in enumerate(text_chunks, 1):
+            print(f"🔊 [{i}/{len(text_chunks)}] チャンク処理中... ({len(chunk_text)}文字)")
+            
+            if args.realtime and not args.no_play:
+                # リアルタイムストリーミング再生
+                audio_data = client.synthesize_and_stream(
+                    text=chunk_text,
+                    model_uuid=args.model_uuid,
+                    speaker_uuid=args.speaker_uuid,
+                    style_name=args.style_name,
+                    output_format=args.format,
+                    speaking_rate=args.rate,
+                    emotional_intensity=args.intensity,
+                    volume=args.volume,
+                    save_file=None,  # チャンクごとの保存は無効
+                    enable_realtime_play=True,
+                    no_wait=args.no_wait
+                )
+            else:
+                # 従来の方式（全データ受信後に再生）
+                audio_data = client.synthesize_speech(
+                    text=chunk_text,
+                    model_uuid=args.model_uuid,
+                    speaker_uuid=args.speaker_uuid,
+                    style_name=args.style_name,
+                    output_format=args.format,
+                    speaking_rate=args.rate,
+                    emotional_intensity=args.intensity,
+                    volume=args.volume
+                )
 
-            print(f"音声データを取得しました（{len(audio_data)} bytes）")
+                print(f"チャンク音声データを取得しました（{len(audio_data)} bytes）")
+                total_audio_data += audio_data
 
-            # ファイル保存
-            if args.save_file:
-                with open(args.save_file, "wb") as f:
-                    f.write(audio_data)
-                print(f"音声ファイルを保存しました: {args.save_file}")
+                # 音声再生
+                if not args.no_play:
+                    print(f"🎵 [{i}/{len(text_chunks)}] 音声を再生中...")
+                    temp_file = client.play_audio(audio_data, args.format)
+                    if temp_file:
+                        print(f"音声ファイル: {temp_file}")
+            
+            # 分割間の一時停止（最後のチャンクでない場合）
+            if i < len(text_chunks) and args.split_pause > 0:
+                print(f"⏸️  {args.split_pause}秒間一時停止...")
+                import time
+                time.sleep(args.split_pause)
 
-            # 音声再生
-            if not args.no_play:
-                print("音声を再生中...")
-                temp_file = client.play_audio(audio_data, args.format)
-                if temp_file:
-                    print(f"音声ファイル: {temp_file}")
+        # 全チャンクの音声データをファイル保存（非リアルタイム時のみ）
+        if args.save_file and not args.realtime and total_audio_data:
+            with open(args.save_file, "wb") as f:
+                f.write(total_audio_data)
+            print(f"音声ファイルを保存しました: {args.save_file} ({len(total_audio_data)} bytes)")
 
         print("完了")
 
