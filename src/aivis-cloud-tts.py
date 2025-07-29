@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from pathlib import Path
 from typing import Optional
 import requests
 
@@ -367,6 +368,26 @@ class AivisCloudTTS:
         return None
 
 
+def load_env_file():
+    """プロジェクトルートの.envファイルを読み込む"""
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    env_file = project_root / ".env"
+    
+    if env_file.exists():
+        try:
+            with open(env_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        # 環境変数が未設定の場合のみ設定
+                        if key.strip() not in os.environ:
+                            os.environ[key.strip()] = value.strip()
+        except Exception as e:
+            print(f"⚠️  .envファイル読み込みエラー: {e}")
+
+
 def get_default_model():
     """デフォルトの音声合成モデルUUIDを返す"""
     # openapi.json の例で使用されているモデル
@@ -375,6 +396,9 @@ def get_default_model():
 
 def main():
     """メイン関数"""
+    # .envファイルを読み込み
+    load_env_file()
+    
     parser = argparse.ArgumentParser(description="Aivis Cloud API を使用した音声合成・再生")
 
     # テキスト入力（どちらか必須）
