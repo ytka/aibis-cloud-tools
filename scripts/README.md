@@ -76,11 +76,9 @@ pip install watchdog
 ```bash
 # .envファイルで設定（推奨）
 CLAUDE_WATCH_DIR=~/.claude/projects
-CLAUDE_TTS_SCRIPT=~/source/aibis-cloud-tools/scripts/speak.sh
 
 # シェル環境変数で設定
 export CLAUDE_WATCH_DIR="~/.claude/projects"
-export CLAUDE_TTS_SCRIPT="~/source/aibis-cloud-tools/scripts/speak.sh"
 ```
 
 ## 共通の環境変数

@@ -42,26 +42,22 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
             if script_path.exists():
                 return str(script_path)
         
-        # スクリプトと同じディレクトリ内のscripts/speak.shを探す
+        # プロジェクト内の相対パスで検索
         script_dir = Path(__file__).parent
-        speak_script = script_dir / "scripts" / "speak.sh"
+        project_root = script_dir.parent
         
-        if speak_script.exists():
-            return str(speak_script)
-        
-        # ホームディレクトリの一般的な場所を探す
-        common_paths = [
-            "~/source/aibis-cloud-tools/scripts/speak.sh",
-            "~/projects/aibis-cloud-tools/scripts/speak.sh",
-            "~/dev/aibis-cloud-tools/scripts/speak.sh",
+        # 可能な相対パス locations
+        possible_paths = [
+            script_dir / "speak.sh",                    # 同じディレクトリ
+            project_root / "scripts" / "speak.sh",     # プロジェクトルート/scripts/
+            project_root / "speak.sh",                 # プロジェクトルート直下
         ]
         
-        for path in common_paths:
-            expanded_path = Path(path).expanduser()
-            if expanded_path.exists():
-                return str(expanded_path)
+        for speak_script in possible_paths:
+            if speak_script.exists():
+                return str(speak_script)
         
-        print("⚠️  speak.shが見つかりません。カスタムパスを指定してください。")
+        print("⚠️  speak.shが見つかりません。--tts-script オプションで指定してください。")
         return None
     
     def _kill_current_tts(self):
@@ -384,18 +380,26 @@ def main():
         epilog="""
 使用例:
   python claude-code-speaker.py                                    # デフォルト設定で実行
-  python claude-code-speaker.py --tts-script ~/path/to/speak.sh    # カスタムTTSスクリプト指定
+  python claude-code-speaker.py --tts-script ./speak.sh            # カスタムTTSスクリプト指定
   python claude-code-speaker.py --watch-dir ~/.claude/sessions     # カスタム監視ディレクトリ指定
 
 環境変数での設定:
   export CLAUDE_WATCH_DIR="~/.claude/projects"                     # 監視ディレクトリ
-  export CLAUDE_TTS_SCRIPT="~/aibis-cloud-tools/scripts/speak.sh"  # TTSスクリプト
   python claude-code-speaker.py                                    # 環境変数で設定して実行
         """
     )
     
-    # デフォルト監視ディレクトリ（環境変数 > デフォルト値の優先順位）
-    default_watch_dir = os.getenv("CLAUDE_WATCH_DIR", "~/.claude/projects")
+    # OS別のデフォルト監視ディレクトリ
+    def get_default_watch_dir():
+        if sys.platform == "win32":
+            # Windows: %APPDATA%/Claude/projects
+            return os.path.expandvars("%APPDATA%/Claude/projects")
+        else:
+            # Unix/Mac: ~/.claude/projects
+            return "~/.claude/projects"
+    
+    # デフォルト監視ディレクトリ（環境変数 > OS別デフォルトの優先順位）
+    default_watch_dir = os.getenv("CLAUDE_WATCH_DIR", get_default_watch_dir())
     
     parser.add_argument(
         "--watch-dir", 
@@ -403,13 +407,13 @@ def main():
         help=f"監視するディレクトリ（環境変数: CLAUDE_WATCH_DIR、デフォルト: {default_watch_dir}）"
     )
     
-    # デフォルトTTSスクリプト（環境変数から取得可能）
-    default_tts_script = os.getenv("CLAUDE_TTS_SCRIPT")
+    # デフォルトTTSスクリプト（自動検出）
+    default_tts_script = None
     
     parser.add_argument(
         "--tts-script",
         default=default_tts_script,
-        help="使用するTTSスクリプトのパス（環境変数: CLAUDE_TTS_SCRIPT、省略時は自動検出）"
+        help="使用するTTSスクリプトのパス（省略時は自動検出）"
     )
     
     args = parser.parse_args()

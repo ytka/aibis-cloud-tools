@@ -142,7 +142,6 @@ uv run scripts/claude-code-speaker.py --help
 
 **環境変数**:
 - `CLAUDE_WATCH_DIR`: Claude Codeの監視ディレクトリ
-- `CLAUDE_TTS_SCRIPT`: 使用するTTSスクリプトのパス
 
 ### MCPサーバー
 

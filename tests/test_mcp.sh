@@ -11,8 +11,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 設定
-PROJECT_DIR="/Users/yutaka/source/aibis-coutd-api"
-MCP_SERVER_CMD="/opt/homebrew/bin/uv run --directory ${PROJECT_DIR} run_mcp_server.py"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+MCP_SERVER_CMD="uv run --directory ${PROJECT_DIR} src/run_mcp_server.py"
 API_KEY="${AIVIS_API_KEY:-aivis_u1DFvX2IDbKh6UH6fDdKg5YEDKkZd8RY}"
 
 # ヘルプ表示
@@ -202,8 +203,8 @@ main() {
     echo ""
     
     # uv コマンドの存在確認
-    if ! command -v /opt/homebrew/bin/uv &> /dev/null; then
-        log_error "uv コマンドが見つかりません: /opt/homebrew/bin/uv"
+    if ! command -v uv &> /dev/null; then
+        log_error "uv コマンドが見つかりません。uvをインストールしてPATHに追加してください"
         exit 1
     fi
     
