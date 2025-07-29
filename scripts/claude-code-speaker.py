@@ -274,7 +274,10 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 try:
                     # 長すぎる場合は最初の2000文字のみ読み上げ（より安全なサイズ）
                     max_length = 2000
-                    read_content = content[:max_length] if len(content) > max_length else content
+                    truncated_content = content[:max_length] if len(content) > max_length else content
+                    
+                    # Markdown記法をクリーニング
+                    read_content = self._clean_markdown_for_tts(truncated_content)
                     
                     # speak.shを使用して読み上げ（引数を安全に渡す）
                     cmd = [
@@ -343,6 +346,44 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
             with self.process_lock:
                 self.is_playing = False
                 self.current_tts_process = None
+    
+    def _clean_markdown_for_tts(self, text):
+        """Markdown記法をTTS読み上げ用にクリーニング"""
+        import re
+        
+        # ヘッダー記号の処理（# ## ### など）
+        text = re.sub(r'^#{1,6}\s*(.+)$', r'\1', text, flags=re.MULTILINE)
+        
+        # 強調記号の削除
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **bold**
+        text = re.sub(r'__(.*?)__', r'\1', text)      # __bold__
+        text = re.sub(r'(?<!\*)\*([^\*\n]+?)\*(?!\*)', r'\1', text)  # *italic* (not part of **)
+        text = re.sub(r'(?<!_)_([^_\n]+?)_(?!_)', r'\1', text)        # _italic_ (not part of __)
+        
+        # コードブロックの処理（先に処理）
+        text = re.sub(r'```[\s\S]*?```', 'コード例', text)  # ```code blocks```
+        text = re.sub(r'`([^`\n]*)`', r'\1', text)      # `inline code`
+        
+        # リンク記法の処理
+        text = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', text)  # [text](url) → text
+        
+        # リスト記号の処理
+        text = re.sub(r'^[\s]*[-\*\+]\s*(.+)$', r'・\1', text, flags=re.MULTILINE)
+        
+        # 引用記号の削除
+        text = re.sub(r'^>\s*(.+)$', r'\1', text, flags=re.MULTILINE)
+        
+        # テーブル区切りの処理
+        text = text.replace('|', '、')
+        
+        # 複数の改行を整理
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # 特殊文字の処理
+        text = text.replace('---', '区切り線')
+        text = text.replace('***', '区切り線')
+        
+        return text.strip()
     
     def _send_notification(self, message):
         """通知メッセージを標準エラー出力に送信"""
