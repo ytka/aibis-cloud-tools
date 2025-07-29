@@ -106,7 +106,39 @@ scripts/speak_long.sh examples/sample.txt
 
 # デバッグ用スクリプト
 scripts/debug_speak.sh examples/sample.txt
+
+# Claude Code応答監視（自動読み上げ）
+python scripts/claude-code-speaker.py
+
+# カスタム設定で実行
+python scripts/claude-code-speaker.py --tts-script scripts/speak.sh --watch-dir ~/.claude/projects
 ```
+
+### Claude Code応答監視
+
+Claude Codeの応答を自動的に検出して読み上げる機能：
+
+```bash
+# 依存関係のインストール
+pip install watchdog
+
+# 基本実行（自動検出）
+python scripts/claude-code-speaker.py
+
+# 詳細なオプション
+python scripts/claude-code-speaker.py --help
+```
+
+**機能**:
+- Claude Codeの応答ファイル（.jsonl）をリアルタイム監視
+- 新しい応答を検出すると自動的にAivis Cloud TTSで読み上げ
+- ログファイル記録とmacOSシステム通知
+- TTSスクリプトの自動検出
+- 環境変数による設定（`.env`ファイル対応）
+
+**環境変数**:
+- `CLAUDE_WATCH_DIR`: Claude Codeの監視ディレクトリ
+- `CLAUDE_TTS_SCRIPT`: 使用するTTSスクリプトのパス
 
 ### MCPサーバー
 
@@ -209,7 +241,9 @@ aibis-cloud-tools/
 ├── scripts/               # シェルスクリプト群
 │   ├── speak.sh          # 簡単読み上げスクリプト
 │   ├── speak_long.sh     # 長文分割読み上げスクリプト
-│   └── debug_speak.sh    # デバッグ用スクリプト
+│   ├── debug_speak.sh    # デバッグ用スクリプト
+│   ├── claude-code-speaker.py # Claude Code応答監視スクリプト
+│   └── README.md         # スクリプトの詳細説明
 ├── examples/              # 使用例・サンプルファイル
 │   └── sample.txt        # サンプルテキストファイル
 ├── tests/                 # テストファイル
