@@ -9,8 +9,8 @@ import time
 import subprocess
 import shlex
 import os
-import signal
 import sys
+import signal
 import threading
 from pathlib import Path
 from watchdog.observers import Observer
@@ -32,8 +32,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         # 既存ファイルの行数を初期化
         self._initialize_processed_lines()
         
-        # キーボード監視スレッドを開始
-        self._start_keyboard_monitor()
+        # ESCキー監視を開始
+        self._start_esc_monitor()
     
     def _find_tts_script(self, custom_path=None):
         """TTSスクリプトのパスを自動検出または設定"""
@@ -96,70 +96,67 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     
                 self.current_tts_process = None
     
-    def _start_keyboard_monitor(self):
-        """キーボード監視スレッドを開始"""
-        try:
-            if sys.platform == "win32":
-                monitor_thread = threading.Thread(target=self._windows_keyboard_monitor, daemon=True)
-            else:
-                monitor_thread = threading.Thread(target=self._unix_keyboard_monitor, daemon=True)
-            
-            monitor_thread.start()
-            print("⌨️  ESCキーで音声をキャンセルできます")
-        except Exception as e:
-            print(f"⚠️  キーボード監視の開始に失敗: {e}")
+    def _start_esc_monitor(self):
+        """ESCキー監視を開始（表示崩れなし）"""
+        if sys.stdin.isatty():
+            try:
+                monitor_thread = threading.Thread(target=self._esc_monitor, daemon=True)
+                monitor_thread.start()
+                print("⌨️  ESCキーで音声をキャンセルできます")
+            except Exception:
+                # エラー時は静かに無効化
+                pass
     
-    def _unix_keyboard_monitor(self):
-        """Unix系システムでのキーボード監視"""
+    def _esc_monitor(self):
+        """ESCキー監視（最適化版）"""
         try:
             import select
-            import tty
             import termios
             
+            # 設定を保存
             old_settings = termios.tcgetattr(sys.stdin)
+            
             try:
-                tty.setraw(sys.stdin.fileno())
+                # 最小限の設定変更でrawモードに近づける
+                new_settings = old_settings[:]
+                new_settings[3] &= ~(termios.ICANON | termios.ECHO)  # カノニカル＆エコー無効
+                new_settings[6][termios.VMIN] = 1     # 最低1文字
+                new_settings[6][termios.VTIME] = 0    # タイムアウトなし
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, new_settings)
                 
                 while True:
-                    if select.select([sys.stdin], [], [], 0.1)[0]:
-                        char = sys.stdin.read(1)
-                        # ESCキー（0x1b）を検出
-                        if ord(char) == 27:
-                            if self.is_playing:
-                                print("\n⌨️  ESCキーが押されました - 音声をキャンセル中...")
-                                self._kill_current_tts()
-                            else:
-                                print("\n⌨️  ESCキーが押されました（再生中ではありません）")
+                    # 入力待機（短時間タイムアウト）
+                    if select.select([sys.stdin], [], [], 0.3)[0]:
+                        try:
+                            char = sys.stdin.read(1)
+                            if char and ord(char) == 27:  # ESC = 0x1b = 27
+                                # エコーを手動で復元して出力
+                                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                                if self.is_playing:
+                                    print("\n⌨️  ESCキー検出 - 音声をキャンセル中...")
+                                    sys.stdout.flush()
+                                    self._kill_current_tts()
+                                else:
+                                    print("\n⌨️  ESCキー検出（再生中ではありません）")
+                                    sys.stdout.flush()
+                                # 設定を再適用
+                                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, new_settings)
+                                
+                        except (OSError, IOError, ValueError):
+                            continue
+                        except (EOFError, KeyboardInterrupt):
+                            break
+                            
             finally:
+                # 必ず元の設定に復元
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-                
-        except ImportError:
-            # 必要なモジュールが利用できない場合
-            print("⚠️  キーボード監視機能は利用できません（select/termios未対応）")
-        except Exception as e:
-            print(f"⚠️  キーボード監視エラー: {e}")
-    
-    def _windows_keyboard_monitor(self):
-        """Windowsでのキーボード監視"""
-        try:
-            import msvcrt
-            
-            while True:
-                if msvcrt.kbhit():
-                    char = msvcrt.getch()
-                    # ESCキー（0x1b）を検出
-                    if ord(char) == 27:
-                        if self.is_playing:
-                            print("\n⌨️  ESCキーが押されました - 音声をキャンセル中...")
-                            self._kill_current_tts()
-                        else:
-                            print("\n⌨️  ESCキーが押されました（再生中ではありません）")
-                time.sleep(0.1)
-                
-        except ImportError:
-            print("⚠️  キーボード監視機能は利用できません（msvcrt未対応）")
-        except Exception as e:
-            print(f"⚠️  キーボード監視エラー: {e}")
+                        
+        except (ImportError, OSError):
+            # termios等が利用できない環境
+            pass
+        except Exception:
+            # その他のエラーで静かに終了
+            pass
     
     def _initialize_processed_lines(self):
         """既存のJSONLファイルの行数を記録（起動時の重複処理を防ぐ）"""
@@ -313,7 +310,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     
                     print(f"🔊 Aivis Cloud TTSで読み上げ開始: {read_content[:50]}...")
                     print(f"🔧 実行コマンド: {' '.join(shlex.quote(arg) for arg in cmd)}")
-                    print("⌨️  ESCキーで音声をキャンセルできます")
+                    if sys.stdin.isatty():
+                        print("⌨️  ESCキーでキャンセル可能")
                     
                     # バックグラウンドでプロセス完了を監視
                     threading.Thread(target=self._monitor_tts_process, daemon=True).start()
