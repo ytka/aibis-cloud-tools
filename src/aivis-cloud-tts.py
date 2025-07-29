@@ -94,7 +94,11 @@ class AivisCloudTTS:
             payload["style_name"] = style_name
 
         response = requests.post(url, headers=self.headers, json=payload, stream=True)
-        response.raise_for_status()
+        
+        # 詳細なHTTPエラーハンドリング
+        if response.status_code != 200:
+            self._handle_http_error(response)
+            response.raise_for_status()  # 例外を発生させる
 
         # レスポンスヘッダーを確認（デバッグ用）
         if 'Content-Type' in response.headers:
@@ -169,7 +173,11 @@ class AivisCloudTTS:
             payload["style_name"] = style_name
 
         response = requests.post(url, headers=self.headers, json=payload, stream=True)
-        response.raise_for_status()
+        
+        # 詳細なHTTPエラーハンドリング
+        if response.status_code != 200:
+            self._handle_http_error(response)
+            response.raise_for_status()  # 例外を発生させる
 
         # レスポンスヘッダーを確認
         if 'Content-Type' in response.headers:
@@ -283,6 +291,36 @@ class AivisCloudTTS:
             print(f"ファイルを保存しました: {save_file}")
 
         return audio_data
+
+    def _handle_http_error(self, response):
+        """HTTPエラーの詳細処理"""
+        status_code = response.status_code
+        
+        if status_code == 503:
+            print("🚨 Aivis Cloud APIで障害が発生しています (503 Service Unavailable)")
+            print("しばらく時間を置いてから再度お試しください")
+        elif status_code == 429:
+            print("⏱️ API制限に達しました (429 Too Many Requests)")
+            print("少し時間を置いてから再度お試しください")
+        elif status_code == 401:
+            print("🔑 認証エラー (401 Unauthorized)")
+            print("AIVIS_API_KEY環境変数を確認してください")
+        elif status_code == 400:
+            print("📝 リクエストエラー (400 Bad Request)")
+            print("テキスト内容やパラメータを確認してください")
+        elif status_code == 500:
+            print("🔥 サーバー内部エラー (500 Internal Server Error)")
+            print("Aivis Cloud側で問題が発生している可能性があります")
+        else:
+            print(f"❌ API エラーが発生しました: HTTP {status_code}")
+        
+        # エラーレスポンスの詳細があれば表示
+        try:
+            error_detail = response.text
+            if error_detail:
+                print(f"詳細: {error_detail}")
+        except:
+            pass
 
     def play_audio(self, audio_data: bytes, output_format: str = "mp3"):
         """

@@ -207,21 +207,50 @@ run_tts_command_with_retry() {
         # エラー内容確認
         local error_content=$(cat "$temp_error")
         
-        # 429エラー（Rate Limit）チェック
-        if echo "$error_content" | grep -q "HTTP 429\|Too Many Requests\|Rate limit"; then
-            ((retry_count++))
-            if [[ $retry_count -lt $max_retries ]]; then
-                local delay=$((base_delay * retry_count))
-                log_warning "レート制限に達しました。${delay}秒後にリトライします... (${retry_count}/${max_retries})"
-                sleep "$delay"
-                rm -f "$temp_output" "$temp_error"
-                continue
-            else
-                log_error "レート制限により最大リトライ回数に達しました"
-            fi
+        # HTTPステータスコードを抽出して詳細表示
+        if echo "$error_content" | grep -q "HTTP [0-9][0-9][0-9]"; then
+            local http_code=$(echo "$error_content" | grep -o "HTTP [0-9][0-9][0-9]" | head -1)
+            case "$http_code" in
+                "HTTP 503")
+                    log_error "🚨 Aivis Cloud APIで障害が発生しています ($http_code Service Unavailable)"
+                    log_error "しばらく時間を置いてから再度お試しください"
+                    cat "$temp_error" >&2
+                    rm -f "$temp_output" "$temp_error"
+                    return $exit_code
+                    ;;
+                "HTTP 429")
+                    log_warning "⏱️  API制限に達しました ($http_code Too Many Requests)"
+                    # 429エラーのリトライ処理
+                    ((retry_count++))
+                    if [[ $retry_count -lt $max_retries ]]; then
+                        local delay=$((base_delay * retry_count))
+                        log_warning "${delay}秒後にリトライします... (${retry_count}/${max_retries})"
+                        sleep "$delay"
+                        rm -f "$temp_output" "$temp_error"
+                        continue
+                    else
+                        log_error "レート制限により最大リトライ回数に達しました"
+                    fi
+                    ;;
+                "HTTP 401")
+                    log_error "🔑 認証エラー ($http_code Unauthorized) - APIキーを確認してください"
+                    ;;
+                "HTTP 400")
+                    log_error "📝 リクエストエラー ($http_code Bad Request) - テキスト内容を確認してください"
+                    ;;
+                "HTTP 500")
+                    log_error "🔥 サーバー内部エラー ($http_code Internal Server Error)"
+                    ;;
+                *)
+                    log_error "❌ API エラーが発生しました: $http_code"
+                    ;;
+            esac
+        else
+            # HTTPステータスコードが含まれていない場合
+            log_error "❌ 不明なエラーが発生しました"
         fi
         
-        # その他のエラー
+        # エラー詳細を表示
         cat "$temp_error" >&2
         rm -f "$temp_output" "$temp_error"
         return $exit_code
