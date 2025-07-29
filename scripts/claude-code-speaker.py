@@ -54,18 +54,18 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         script_dir = Path(__file__).parent
         project_root = script_dir.parent
         
-        # 可能な相対パス locations
+        # aivis-cloud-tts.pyを直接検索
         possible_paths = [
-            script_dir / "speak.sh",                    # 同じディレクトリ
-            project_root / "scripts" / "speak.sh",     # プロジェクトルート/scripts/
-            project_root / "speak.sh",                 # プロジェクトルート直下
+            project_root / "src" / "aivis-cloud-tts.py",  # プロジェクトルート/src/
+            script_dir / "aivis-cloud-tts.py",            # 同じディレクトリ
+            project_root / "aivis-cloud-tts.py",          # プロジェクトルート直下
         ]
         
-        for speak_script in possible_paths:
-            if speak_script.exists():
-                return str(speak_script)
+        for tts_script in possible_paths:
+            if tts_script.exists():
+                return str(tts_script)
         
-        print("⚠️  speak.shが見つかりません。--tts-script オプションで指定してください。")
+        print("⚠️  aivis-cloud-tts.pyが見つかりません。--tts-script オプションで指定してください。")
         return None
     
     def _kill_current_tts(self):
@@ -287,10 +287,15 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     # Markdown記法をクリーニング
                     read_content = self._clean_markdown_for_tts(truncated_content)
                     
-                    # speak.shを使用して読み上げ（引数を安全に渡す）
+                    # aivis-cloud-tts.pyを直接実行（uv runで）
+                    script_dir = Path(__file__).parent
+                    project_root = script_dir.parent
+                    
                     cmd = [
+                        "uv", "run", 
+                        "--directory", str(project_root),
                         self.tts_script_path,
-                        read_content
+                        "--text", read_content
                     ]
                     
                     # プロセス管理情報を更新
@@ -516,13 +521,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用例:
-  python claude-code-speaker.py                                    # デフォルト設定で実行
-  python claude-code-speaker.py --tts-script ./speak.sh            # カスタムTTSスクリプト指定
-  python claude-code-speaker.py --watch-dir ~/.claude/sessions     # カスタム監視ディレクトリ指定
+  python claude-code-speaker.py                                           # デフォルト設定で実行
+  python claude-code-speaker.py --tts-script ./src/aivis-cloud-tts.py     # カスタムTTSスクリプト指定
+  python claude-code-speaker.py --watch-dir ~/.claude/sessions            # カスタム監視ディレクトリ指定
 
 環境変数での設定:
-  export CLAUDE_WATCH_DIR="~/.claude/projects"                     # 監視ディレクトリ
-  python claude-code-speaker.py                                    # 環境変数で設定して実行
+  export CLAUDE_WATCH_DIR="~/.claude/projects"                            # 監視ディレクトリ
+  python claude-code-speaker.py                                           # 環境変数で設定して実行
         """
     )
     
@@ -571,7 +576,7 @@ def main():
         print(f"🔊 TTSスクリプト: {event_handler.tts_script_path}")
     else:
         print("⚠️  TTSスクリプトが見つかりません。通知のみ行います。")
-        print("💡 --tts-script オプションでspeak.shのパスを指定してください")
+        print("💡 --tts-script オプションでaivis-cloud-tts.pyのパスを指定してください")
     
     print(f"👁️  Claude応答監視を開始します...")
     print(f"📂 監視ディレクトリ: {watch_path}")
