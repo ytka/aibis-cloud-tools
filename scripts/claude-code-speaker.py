@@ -27,6 +27,10 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         self.process_lock = threading.Lock()
         self.is_playing = False
         
+        # クリーンアップ管理
+        self._cleanup_done = False
+        self._cleanup_lock = threading.Lock()
+        
         # TTSスクリプトのパスを設定
         self.tts_script_path = self._find_tts_script(tts_script_path)
         
@@ -392,13 +396,25 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
     def _setup_signal_handlers(self):
         """プロセスクリーンアップ用のシグナルハンドラーを設定"""
         def cleanup_handler(signum, frame):
-            print(f"\n🛑 シグナル {signum} を受信、プロセスをクリーンアップ中...")
+            # 安全な出力（標準エラー使用、reentrant call回避）
+            try:
+                sys.stderr.write(f"\n🛑 シグナル {signum} を受信、プロセスをクリーンアップ中...\n")
+                sys.stderr.flush()
+            except:
+                pass  # 出力エラーを無視
+            
             self._cleanup_all_processes()
             sys.exit(0)
         
         def cleanup_atexit():
-            print("🧹 終了時クリーンアップを実行中...")
-            self._cleanup_all_processes()
+            # atexitでは重複チェックのみ実行
+            if not self._cleanup_done:
+                try:
+                    sys.stderr.write("🧹 終了時クリーンアップを実行中...\n")
+                    sys.stderr.flush()
+                except:
+                    pass
+                self._cleanup_all_processes()
         
         # シグナルハンドラー登録
         signal.signal(signal.SIGINT, cleanup_handler)   # Ctrl-C
@@ -410,37 +426,60 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         print("🔧 プロセスクリーンアップハンドラーを設定しました")
     
     def _cleanup_all_processes(self):
-        """全ての子プロセスをクリーンアップ"""
+        """全ての子プロセスをクリーンアップ（重複実行防止付き）"""
+        with self._cleanup_lock:
+            # 既にクリーンアップ済みの場合はスキップ
+            if self._cleanup_done:
+                return
+            
+            self._cleanup_done = True
+        
         try:
             # 現在のTTSプロセスを終了
             if hasattr(self, 'current_tts_process') and self.current_tts_process:
-                print("🎵 TTSプロセスを終了中...")
+                try:
+                    sys.stderr.write("🎵 TTSプロセスを終了中...\n")
+                    sys.stderr.flush()
+                except:
+                    pass
                 self._kill_current_tts()
             
             # プロセスグループ全体を終了（uv runの子プロセスも含む）
             try:
                 # 現在のプロセスグループIDを取得
                 pgid = os.getpgid(os.getpid())
-                print(f"📋 プロセスグループ {pgid} を終了中...")
+                try:
+                    sys.stderr.write(f"📋 プロセスグループ {pgid} を終了中...\n")
+                    sys.stderr.flush()
+                except:
+                    pass
                 
                 # プロセスグループ全体にSIGTERMを送信
-                os.killpg(pgid, signal.SIGTERM)
+                try:
+                    os.killpg(pgid, signal.SIGTERM)
+                except (OSError, ProcessLookupError):
+                    pass  # プロセスが既に存在しない場合は無視
                 
                 # 少し待機してからSIGKILLで強制終了
-                time.sleep(1)
+                time.sleep(0.5)  # 短縮して応答性向上
                 try:
                     os.killpg(pgid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass  # 既に終了している場合
+                except (OSError, ProcessLookupError):
+                    pass  # 既に終了している場合は無視
                     
-            except (OSError, ProcessLookupError) as e:
-                # プロセスグループ操作に失敗した場合
-                print(f"⚠️  プロセスグループ終了に失敗: {e}")
+            except Exception:
+                # プロセスグループ操作のエラーは静かに無視
+                pass
             
-            print("✅ プロセスクリーンアップ完了")
+            try:
+                sys.stderr.write("✅ プロセスクリーンアップ完了\n")
+                sys.stderr.flush()
+            except:
+                pass
             
-        except Exception as e:
-            print(f"❌ クリーンアップエラー: {e}")
+        except Exception:
+            # 全てのエラーを静かに無視（シグナルハンドラー内での安全性確保）
+            pass
     
     def _send_notification(self, message):
         """通知メッセージを標準エラー出力に送信"""
