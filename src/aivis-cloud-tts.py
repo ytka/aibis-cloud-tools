@@ -200,6 +200,9 @@ class AivisCloudTTS:
         
         if enable_realtime_play and temp_file_path:
             # リアルタイム再生用の書き込み
+            # 32KBバッファリング改善：十分なデータが蓄積されてからafplayを開始
+            MIN_BUFFER_SIZE = 32 * 1024  # 32KB - MP3ヘッダー + 音声データの完整性を確保
+            
             with open(temp_file_path, "wb") as f:
                 chunk_count = 0
                 for chunk in response.iter_content(chunk_size=8192):
@@ -209,16 +212,16 @@ class AivisCloudTTS:
                         f.flush()  # 即座にディスクに書き込み
                         chunk_count += 1
                         
-                        # 最初のチャンクを受信したらafplayを開始
-                        if chunk_count == 1 and not audio_player:
-                            print("最初のチャンクを受信、afplayを開始...")
+                        # 32KB以上のデータが蓄積されたらafplayを開始
+                        if len(audio_data) >= MIN_BUFFER_SIZE and not audio_player:
+                            print(f"十分なデータを受信（{len(audio_data)} bytes >= {MIN_BUFFER_SIZE} bytes）、afplayを開始...")
                             try:
                                 audio_player = subprocess.Popen(
                                     ["afplay", temp_file_path],
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE
                                 )
-                                print("afplayプロセスを開始しました")
+                                print("afplayプロセスを開始しました（音声冒頭飛び対策済み）")
                             except Exception as e:
                                 print(f"afplayの開始に失敗: {e}")
                         
