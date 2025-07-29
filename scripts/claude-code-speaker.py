@@ -10,9 +10,7 @@ import subprocess
 import shlex
 import os
 import sys
-import signal
 import threading
-import atexit
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -39,9 +37,6 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         
         # ESCキー監視を開始
         self._start_esc_monitor()
-        
-        # プロセスクリーンアップのシグナルハンドラー登録
-        self._setup_signal_handlers()
     
     def _find_tts_script(self, custom_path=None):
         """TTSスクリプトのパスを自動検出または設定"""
@@ -81,13 +76,12 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                         except subprocess.TimeoutExpired:
                             self.current_tts_process.kill()
                     else:
-                        # Unix系: プロセスグループ全体を終了
-                        pgid = os.getpgid(self.current_tts_process.pid)
-                        os.killpg(pgid, signal.SIGTERM)
+                        # Unix系: プロセスを終了
+                        self.current_tts_process.terminate()
                         try:
                             self.current_tts_process.wait(timeout=2)
                         except subprocess.TimeoutExpired:
-                            os.killpg(pgid, signal.SIGKILL)
+                            self.current_tts_process.kill()
                     
                     print("🛑 前の音声再生をキャンセルしました")
                     self.is_playing = False
@@ -391,94 +385,15 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         
         return text.strip()
     
-    def _setup_signal_handlers(self):
-        """プロセスクリーンアップ用のシグナルハンドラーを設定"""
-        def cleanup_handler(signum, frame):
-            # 安全な出力（標準エラー使用、reentrant call回避）
-            try:
-                sys.stderr.write(f"\n🛑 シグナル {signum} を受信、プロセスをクリーンアップ中...\n")
-                sys.stderr.flush()
-            except:
-                pass  # 出力エラーを無視
-            
-            self._cleanup_all_processes()
-            # スレッドシャットダウン中のsys.exit()を避けるため、os._exit()を使用
-            os._exit(0)
-        
-        def cleanup_atexit():
-            # atexitでは重複チェックのみ実行
-            if not self._cleanup_done:
-                try:
-                    sys.stderr.write("🧹 終了時クリーンアップを実行中...\n")
-                    sys.stderr.flush()
-                except:
-                    pass
-                self._cleanup_all_processes()
-        
-        # シグナルハンドラー登録
-        signal.signal(signal.SIGINT, cleanup_handler)   # Ctrl-C
-        signal.signal(signal.SIGTERM, cleanup_handler)  # 終了シグナル
-        
-        # プロセス終了時のクリーンアップ
-        atexit.register(cleanup_atexit)
-        
-        print("🔧 プロセスクリーンアップハンドラーを設定しました")
-    
-    def _cleanup_all_processes(self):
-        """全ての子プロセスをクリーンアップ（重複実行防止付き）"""
+    def cleanup(self):
+        """後処理 - 現在のTTSプロセスを停止"""
         with self._cleanup_lock:
-            # 既にクリーンアップ済みの場合はスキップ
             if self._cleanup_done:
                 return
-            
             self._cleanup_done = True
         
-        try:
-            # 現在のTTSプロセスを終了
-            if hasattr(self, 'current_tts_process') and self.current_tts_process:
-                try:
-                    sys.stderr.write("🎵 TTSプロセスを終了中...\n")
-                    sys.stderr.flush()
-                except:
-                    pass
-                self._kill_current_tts()
-            
-            # プロセスグループ全体を終了（uv runの子プロセスも含む）
-            try:
-                # 現在のプロセスグループIDを取得
-                pgid = os.getpgid(os.getpid())
-                try:
-                    sys.stderr.write(f"📋 プロセスグループ {pgid} を終了中...\n")
-                    sys.stderr.flush()
-                except:
-                    pass
-                
-                # プロセスグループ全体にSIGTERMを送信
-                try:
-                    os.killpg(pgid, signal.SIGTERM)
-                except (OSError, ProcessLookupError):
-                    pass  # プロセスが既に存在しない場合は無視
-                
-                # 少し待機してからSIGKILLで強制終了
-                time.sleep(0.5)  # 短縮して応答性向上
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    pass  # 既に終了している場合は無視
-                    
-            except Exception:
-                # プロセスグループ操作のエラーは静かに無視
-                pass
-            
-            try:
-                sys.stderr.write("✅ プロセスクリーンアップ完了\n")
-                sys.stderr.flush()
-            except:
-                pass
-            
-        except Exception:
-            # 全てのエラーを静かに無視（シグナルハンドラー内での安全性確保）
-            pass
+        print("🧹 TTSプロセスをクリーンアップ中...")
+        self._kill_current_tts()
     
     def _send_notification(self, message):
         """通知メッセージを標準エラー出力に送信"""
@@ -506,6 +421,7 @@ def load_env_file():
 def main():
     """メイン関数"""
     import argparse
+    import signal
     
     # .envファイルを読み込み
     load_env_file()
@@ -564,6 +480,15 @@ def main():
     
     # イベントハンドラーの初期化
     event_handler = ClaudeResponseWatcher(args.watch_dir, args.tts_script)
+    
+    # メイン実行時のみシグナル処理を設定
+    def graceful_shutdown(signum, frame):
+        print(f"\n🛑 シグナル {signum} を受信、正常終了中...")
+        event_handler.cleanup()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, graceful_shutdown)   # Ctrl-C
+    signal.signal(signal.SIGTERM, graceful_shutdown)  # 終了シグナル
     
     # TTSスクリプトの確認
     if event_handler.tts_script_path:
