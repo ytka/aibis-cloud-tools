@@ -349,14 +349,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 self.current_tts_process = None
     
     def _send_notification(self, message):
-        """macOSシステム通知を送信"""
-        try:
-            subprocess.run([
-                'osascript', '-e',
-                f'display notification "{message}" with title "Claude Monitor"'
-            ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        """通知メッセージを標準エラー出力に送信"""
+        print(f"🔔 {message}", file=sys.stderr, flush=True)
 
 def load_env_file():
     """プロジェクトルートの.envファイルを読み込む"""
