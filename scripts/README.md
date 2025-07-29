@@ -40,6 +40,9 @@
 Claude Codeの応答を監視し、自動的にAivis Cloud TTSで読み上げるスクリプト。
 
 ```bash
+# uvで実行（推奨、依存関係自動管理）
+uv run claude-code-speaker.py
+
 # 基本実行（自動検出）
 python claude-code-speaker.py
 
@@ -47,7 +50,7 @@ python claude-code-speaker.py
 python claude-code-speaker.py --tts-script ./speak.sh --watch-dir ~/.claude/projects
 
 # ヘルプ表示
-python claude-code-speaker.py --help
+uv run claude-code-speaker.py --help
 ```
 
 #### 機能
@@ -58,6 +61,10 @@ python claude-code-speaker.py --help
 
 #### 依存関係
 ```bash
+# uvを使用する場合（推奨）- 自動的に依存関係が管理されます
+uv run claude-code-speaker.py
+
+# 手動でインストールする場合
 pip install watchdog
 ```
 

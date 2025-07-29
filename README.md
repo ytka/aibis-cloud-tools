@@ -110,6 +110,9 @@ scripts/debug_speak.sh examples/sample.txt
 # Claude Code応答監視（自動読み上げ）
 python scripts/claude-code-speaker.py
 
+# uvで実行（推奨）
+uv run scripts/claude-code-speaker.py
+
 # カスタム設定で実行
 python scripts/claude-code-speaker.py --tts-script scripts/speak.sh --watch-dir ~/.claude/projects
 ```
@@ -119,14 +122,15 @@ python scripts/claude-code-speaker.py --tts-script scripts/speak.sh --watch-dir 
 Claude Codeの応答を自動的に検出して読み上げる機能：
 
 ```bash
-# 依存関係のインストール
-pip install watchdog
+# uvで実行（推奨、依存関係自動管理）
+uv run scripts/claude-code-speaker.py
 
-# 基本実行（自動検出）
+# 手動で依存関係をインストールして実行
+pip install watchdog
 python scripts/claude-code-speaker.py
 
 # 詳細なオプション
-python scripts/claude-code-speaker.py --help
+uv run scripts/claude-code-speaker.py --help
 ```
 
 **機能**:
