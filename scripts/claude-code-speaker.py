@@ -9,6 +9,9 @@ import time
 import subprocess
 import shlex
 import os
+import signal
+import sys
+import threading
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -18,11 +21,19 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         self.watch_dir = Path(watch_dir).expanduser()
         self.processed_lines = {}  # ファイルごとの処理済み行数
         
+        # TTSプロセス管理
+        self.current_tts_process = None
+        self.process_lock = threading.Lock()
+        self.is_playing = False
+        
         # TTSスクリプトのパスを設定
         self.tts_script_path = self._find_tts_script(tts_script_path)
         
         # 既存ファイルの行数を初期化
         self._initialize_processed_lines()
+        
+        # キーボード監視スレッドを開始
+        self._start_keyboard_monitor()
     
     def _find_tts_script(self, custom_path=None):
         """TTSスクリプトのパスを自動検出または設定"""
@@ -52,6 +63,103 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         
         print("⚠️  speak.shが見つかりません。カスタムパスを指定してください。")
         return None
+    
+    def _kill_current_tts(self):
+        """現在のTTS再生を停止"""
+        with self.process_lock:
+            if self.current_tts_process and self.current_tts_process.poll() is None:
+                try:
+                    if sys.platform == "win32":
+                        # Windows: プロセスを終了
+                        self.current_tts_process.terminate()
+                        try:
+                            self.current_tts_process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            self.current_tts_process.kill()
+                    else:
+                        # Unix系: プロセスグループ全体を終了
+                        pgid = os.getpgid(self.current_tts_process.pid)
+                        os.killpg(pgid, signal.SIGTERM)
+                        try:
+                            self.current_tts_process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(pgid, signal.SIGKILL)
+                    
+                    print("🛑 前の音声再生をキャンセルしました")
+                    self.is_playing = False
+                    
+                except (ProcessLookupError, OSError) as e:
+                    # プロセスが既に終了している場合
+                    pass
+                except Exception as e:
+                    print(f"⚠️  音声キャンセルエラー: {e}")
+                    
+                self.current_tts_process = None
+    
+    def _start_keyboard_monitor(self):
+        """キーボード監視スレッドを開始"""
+        try:
+            if sys.platform == "win32":
+                monitor_thread = threading.Thread(target=self._windows_keyboard_monitor, daemon=True)
+            else:
+                monitor_thread = threading.Thread(target=self._unix_keyboard_monitor, daemon=True)
+            
+            monitor_thread.start()
+            print("⌨️  ESCキーで音声をキャンセルできます")
+        except Exception as e:
+            print(f"⚠️  キーボード監視の開始に失敗: {e}")
+    
+    def _unix_keyboard_monitor(self):
+        """Unix系システムでのキーボード監視"""
+        try:
+            import select
+            import tty
+            import termios
+            
+            old_settings = termios.tcgetattr(sys.stdin)
+            try:
+                tty.setraw(sys.stdin.fileno())
+                
+                while True:
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                        char = sys.stdin.read(1)
+                        # ESCキー（0x1b）を検出
+                        if ord(char) == 27:
+                            if self.is_playing:
+                                print("\n⌨️  ESCキーが押されました - 音声をキャンセル中...")
+                                self._kill_current_tts()
+                            else:
+                                print("\n⌨️  ESCキーが押されました（再生中ではありません）")
+            finally:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                
+        except ImportError:
+            # 必要なモジュールが利用できない場合
+            print("⚠️  キーボード監視機能は利用できません（select/termios未対応）")
+        except Exception as e:
+            print(f"⚠️  キーボード監視エラー: {e}")
+    
+    def _windows_keyboard_monitor(self):
+        """Windowsでのキーボード監視"""
+        try:
+            import msvcrt
+            
+            while True:
+                if msvcrt.kbhit():
+                    char = msvcrt.getch()
+                    # ESCキー（0x1b）を検出
+                    if ord(char) == 27:
+                        if self.is_playing:
+                            print("\n⌨️  ESCキーが押されました - 音声をキャンセル中...")
+                            self._kill_current_tts()
+                        else:
+                            print("\n⌨️  ESCキーが押されました（再生中ではありません）")
+                time.sleep(0.1)
+                
+        except ImportError:
+            print("⚠️  キーボード監視機能は利用できません（msvcrt未対応）")
+        except Exception as e:
+            print(f"⚠️  キーボード監視エラー: {e}")
     
     def _initialize_processed_lines(self):
         """既存のJSONLファイルの行数を記録（起動時の重複処理を防ぐ）"""
@@ -154,6 +262,11 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
     def execute_custom_command(self, content, timestamp, session_id):
         """カスタムコマンドの実行（Aivis Cloud TTS読み上げ版）"""
         try:
+            # 前の音声再生をキャンセル
+            if self.is_playing:
+                print("🛑 前の音声再生をキャンセルしています...")
+                self._kill_current_tts()
+            
             # ログファイルに記録
             log_file = Path.home() / "claude-responses.log"
             with open(log_file, 'a', encoding='utf-8') as f:
@@ -176,14 +289,38 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                         read_content
                     ]
                     
-                    # バックグラウンドで実行
-                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # プロセス管理情報を更新
+                    with self.process_lock:
+                        self.is_playing = True
+                        
+                        # プロセスグループを作成してバックグラウンドで実行
+                        if sys.platform == "win32":
+                            # Windows: CREATE_NEW_PROCESS_GROUP フラグを使用
+                            self.current_tts_process = subprocess.Popen(
+                                cmd, 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.DEVNULL,
+                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                            )
+                        else:
+                            # Unix系: 新しいプロセスグループを作成
+                            self.current_tts_process = subprocess.Popen(
+                                cmd, 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.DEVNULL,
+                                preexec_fn=os.setsid
+                            )
                     
                     print(f"🔊 Aivis Cloud TTSで読み上げ開始: {read_content[:50]}...")
                     print(f"🔧 実行コマンド: {' '.join(shlex.quote(arg) for arg in cmd)}")
+                    print("⌨️  ESCキーで音声をキャンセルできます")
+                    
+                    # バックグラウンドでプロセス完了を監視
+                    threading.Thread(target=self._monitor_tts_process, daemon=True).start()
                     
                 except Exception as tts_error:
                     print(f"⚠️  TTS読み上げエラー: {tts_error}")
+                    self.is_playing = False
                     self._send_notification("TTS読み上げに失敗しました")
             else:
                 print("⚠️  TTSスクリプトが設定されていないため、読み上げをスキップします")
@@ -191,6 +328,27 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 
         except Exception as e:
             print(f"❌ コマンド実行エラー: {e}")
+            self.is_playing = False
+    
+    def _monitor_tts_process(self):
+        """TTSプロセスの完了を監視するバックグラウンドスレッド"""
+        try:
+            if self.current_tts_process:
+                # プロセスの完了を待機
+                self.current_tts_process.wait()
+                
+                # プロセス管理状態をクリア
+                with self.process_lock:
+                    self.is_playing = False
+                    self.current_tts_process = None
+                
+                print("✅ 音声再生が完了しました")
+                
+        except Exception as e:
+            print(f"⚠️  プロセス監視エラー: {e}")
+            with self.process_lock:
+                self.is_playing = False
+                self.current_tts_process = None
     
     def _send_notification(self, message):
         """macOSシステム通知を送信"""
