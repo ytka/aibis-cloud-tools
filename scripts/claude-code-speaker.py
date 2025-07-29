@@ -298,27 +298,20 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                         "--text", read_content
                     ]
                     
+                    # 環境変数をコピー
+                    env = os.environ.copy()
+                    
                     # プロセス管理情報を更新
                     with self.process_lock:
                         self.is_playing = True
                         
-                        # プロセスグループを作成してバックグラウンドで実行
-                        if sys.platform == "win32":
-                            # Windows: CREATE_NEW_PROCESS_GROUP フラグを使用
-                            self.current_tts_process = subprocess.Popen(
-                                cmd, 
-                                stdout=subprocess.DEVNULL, 
-                                stderr=subprocess.DEVNULL,
-                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-                            )
-                        else:
-                            # Unix系: 新しいプロセスグループを作成
-                            self.current_tts_process = subprocess.Popen(
-                                cmd, 
-                                stdout=subprocess.DEVNULL, 
-                                stderr=subprocess.DEVNULL,
-                                preexec_fn=os.setsid
-                            )
+                        # 子プロセスを親と同じプロセスグループで実行
+                        self.current_tts_process = subprocess.Popen(
+                            cmd, 
+                            stdout=subprocess.DEVNULL, 
+                            stderr=subprocess.DEVNULL,
+                            env=env
+                        )
                     
                     print(f"🔊 Aivis Cloud TTSで読み上げ開始: {read_content[:50]}...")
                     print(f"🔧 実行コマンド: {' '.join(shlex.quote(arg) for arg in cmd)}")

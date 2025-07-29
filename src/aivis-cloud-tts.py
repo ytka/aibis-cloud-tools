@@ -6,10 +6,10 @@ Aivis Cloud API を使用した音声合成・再生スクリプト
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
-import threading
 from pathlib import Path
 from typing import Optional
 import requests
@@ -271,9 +271,6 @@ class AivisCloudTTS:
                 try:
                     return_code = audio_player.wait(timeout=estimated_duration)
                     print(f"afplayが終了しました (return code: {return_code})")
-                    if temp_file_path and os.path.exists(temp_file_path):
-                        os.unlink(temp_file_path)  # 一時ファイル削除
-                        print("一時ファイルを削除しました")
                 except subprocess.TimeoutExpired:
                     print(f"afplayがタイムアウトしました ({estimated_duration:.1f}秒)、強制終了します")
                     audio_player.terminate()
@@ -282,8 +279,24 @@ class AivisCloudTTS:
                     except subprocess.TimeoutExpired:
                         audio_player.kill()  # さらに強制終了
                         print("afplayを強制終了しました")
+                except KeyboardInterrupt:
+                    print("\n🛑 音声再生を中断しています...")
+                    audio_player.terminate()
+                    try:
+                        audio_player.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        audio_player.kill()
+                    raise
                 except Exception as e:
                     print(f"リアルタイム再生の終了処理でエラー: {e}")
+                finally:
+                    # 一時ファイル削除
+                    if temp_file_path and os.path.exists(temp_file_path):
+                        try:
+                            os.unlink(temp_file_path)
+                            print("一時ファイルを削除しました")
+                        except OSError:
+                            pass
 
         # 通常の保存処理
         if save_file and not enable_realtime_play:
@@ -343,13 +356,16 @@ class AivisCloudTTS:
         try:
             # macOSの場合はafplayを使用
             if sys.platform == "darwin":
-                subprocess.run(["afplay", temp_file_path], check=True)
+                proc = subprocess.Popen(["afplay", temp_file_path])
+                proc.wait()  # 完了を待つ
             # Linuxの場合はplayやaplayを試行
             elif sys.platform == "linux":
                 try:
-                    subprocess.run(["play", temp_file_path], check=True)
+                    proc = subprocess.Popen(["play", temp_file_path])
+                    proc.wait()
                 except FileNotFoundError:
-                    subprocess.run(["aplay", temp_file_path], check=True)
+                    proc = subprocess.Popen(["aplay", temp_file_path])
+                    proc.wait()
             # Windowsの場合
             elif sys.platform == "win32":
                 import winsound
@@ -358,6 +374,15 @@ class AivisCloudTTS:
                 print(f"音声ファイルが保存されました: {temp_file_path}")
                 print("手動で再生してください")
                 return temp_file_path
+        except KeyboardInterrupt:
+            print("\n🛑 音声再生を中断しています...")
+            if 'proc' in locals() and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            raise
         finally:
             # 一時ファイルを削除
             try:
@@ -453,6 +478,14 @@ def main():
     """メイン関数"""
     # .envファイルを読み込み
     load_env_file()
+    
+    # メイン実行時のみシグナル処理を設定
+    def graceful_shutdown(signum, frame):
+        print(f"\n🛑 シグナル {signum} を受信、正常終了中...")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, graceful_shutdown)   # Ctrl-C
+    signal.signal(signal.SIGTERM, graceful_shutdown)  # 終了シグナル
     
     parser = argparse.ArgumentParser(description="Aivis Cloud API を使用した音声合成・再生")
 
