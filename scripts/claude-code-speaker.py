@@ -12,6 +12,7 @@ import os
 import sys
 import signal
 import threading
+import atexit
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -34,6 +35,9 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         
         # ESCキー監視を開始
         self._start_esc_monitor()
+        
+        # プロセスクリーンアップのシグナルハンドラー登録
+        self._setup_signal_handlers()
     
     def _find_tts_script(self, custom_path=None):
         """TTSスクリプトのパスを自動検出または設定"""
@@ -384,6 +388,59 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         text = text.replace('***', '区切り線')
         
         return text.strip()
+    
+    def _setup_signal_handlers(self):
+        """プロセスクリーンアップ用のシグナルハンドラーを設定"""
+        def cleanup_handler(signum, frame):
+            print(f"\n🛑 シグナル {signum} を受信、プロセスをクリーンアップ中...")
+            self._cleanup_all_processes()
+            sys.exit(0)
+        
+        def cleanup_atexit():
+            print("🧹 終了時クリーンアップを実行中...")
+            self._cleanup_all_processes()
+        
+        # シグナルハンドラー登録
+        signal.signal(signal.SIGINT, cleanup_handler)   # Ctrl-C
+        signal.signal(signal.SIGTERM, cleanup_handler)  # 終了シグナル
+        
+        # プロセス終了時のクリーンアップ
+        atexit.register(cleanup_atexit)
+        
+        print("🔧 プロセスクリーンアップハンドラーを設定しました")
+    
+    def _cleanup_all_processes(self):
+        """全ての子プロセスをクリーンアップ"""
+        try:
+            # 現在のTTSプロセスを終了
+            if hasattr(self, 'current_tts_process') and self.current_tts_process:
+                print("🎵 TTSプロセスを終了中...")
+                self._kill_current_tts()
+            
+            # プロセスグループ全体を終了（uv runの子プロセスも含む）
+            try:
+                # 現在のプロセスグループIDを取得
+                pgid = os.getpgid(os.getpid())
+                print(f"📋 プロセスグループ {pgid} を終了中...")
+                
+                # プロセスグループ全体にSIGTERMを送信
+                os.killpg(pgid, signal.SIGTERM)
+                
+                # 少し待機してからSIGKILLで強制終了
+                time.sleep(1)
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # 既に終了している場合
+                    
+            except (OSError, ProcessLookupError) as e:
+                # プロセスグループ操作に失敗した場合
+                print(f"⚠️  プロセスグループ終了に失敗: {e}")
+            
+            print("✅ プロセスクリーンアップ完了")
+            
+        except Exception as e:
+            print(f"❌ クリーンアップエラー: {e}")
     
     def _send_notification(self, message):
         """通知メッセージを標準エラー出力に送信"""
