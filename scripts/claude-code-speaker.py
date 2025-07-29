@@ -409,7 +409,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 pass  # 出力エラーを無視
             
             self._cleanup_all_processes()
-            sys.exit(0)
+            # スレッドシャットダウン中のsys.exit()を避けるため、os._exit()を使用
+            os._exit(0)
         
         def cleanup_atexit():
             # atexitでは重複チェックのみ実行
