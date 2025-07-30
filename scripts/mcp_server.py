@@ -151,7 +151,7 @@ async def handle_call_tool(
                     continue
                 
                 # 長いテキストの場合は分割処理
-                text_chunks = split_text_smart(segment["text"], 2000)
+                text_chunks = split_text_smart(segment["text"], 3000)
                 
                 if len(text_chunks) > 1:
                     print(f"📝 セグメント{i}: テキストを{len(text_chunks)}個のチャンクに分割")

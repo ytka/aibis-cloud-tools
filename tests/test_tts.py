@@ -9,10 +9,6 @@ Test-Driven Development approach:
 """
 
 import pytest
-import tempfile
-import os
-import subprocess
-import json
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import sys

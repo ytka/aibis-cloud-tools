@@ -9,11 +9,9 @@ Test-Driven Development approach:
 """
 
 import pytest
-import asyncio
-import json
 import os
 from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import Mock, patch
 import sys
 
 # プロジェクトルートをPythonパスに追加
@@ -23,10 +21,8 @@ sys.path.insert(0, str(project_root))
 from scripts.mcp_server import (
     get_tts_client,
     handle_list_tools,
-    handle_call_tool,
-    server
+    handle_call_tool
 )
-import mcp.types as types
 
 
 class TestGetTtsClient:
@@ -232,12 +228,12 @@ class TestHandleCallTool:
     @pytest.mark.asyncio
     async def test_長いテキストが分割処理される(self):
         """
-        Given: 2000文字を超える長いテキスト
+        Given: 3000文字を超える長いテキスト
         When: handle_call_tool()を実行
         Then: テキストが分割され各チャンクが処理される
         """
         # Given
-        long_text = "これは長いテキストです。" * 200  # 約2400文字
+        long_text = "これは長いテキストです。" * 300  # 約3600文字
         arguments = {"text": long_text}
         
         mock_audio_data = b"fake_audio_data"
@@ -257,8 +253,8 @@ class TestHandleCallTool:
             mock_get_model.return_value = "default-model-uuid"
             
             # 2つのチャンクに分割される
-            chunk1 = long_text[:2000]
-            chunk2 = long_text[2000:]
+            chunk1 = long_text[:3000]
+            chunk2 = long_text[3000:]
             mock_split.return_value = [chunk1, chunk2]
             mock_exists.return_value = True
             
@@ -272,7 +268,7 @@ class TestHandleCallTool:
             assert result_data["success"] is True
             
             # 分割処理が呼び出されたことを確認
-            mock_split.assert_called_once_with(long_text, 2000)
+            mock_split.assert_called_once_with(long_text, 3000)
             
             # 各チャンクが処理されたことを確認
             assert mock_client.synthesize_speech.call_count == 2

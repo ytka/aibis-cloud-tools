@@ -29,7 +29,7 @@ def load_env_file():
             print(f"⚠️  .envファイル読み込みエラー: {e}")
 
 
-def split_text_smart(text, max_chars=2000):
+def split_text_smart(text, max_chars=3000):
     """テキストを賢く分割する（文章境界を考慮）"""
     if not text:  # 空文字列チェックを追加
         return []

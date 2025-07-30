@@ -15,7 +15,32 @@ Aivis Cloud API を使用した音声合成・再生スクリプトです。uv�
 
 - Python 3.8+
 - [uv](https://docs.astral.sh/uv/) パッケージマネージャー
-- Aivis Cloud API のAPIキー
+- [Aivis Cloud API](https://aivis-project.com/cloud-api/) のAPIキー
+
+## Aivis Cloud API について
+
+**Aivis Cloud API** は、日本語に特化した高品質な音声合成APIサービスです。
+
+### 特徴
+- **高品質な日本語音声合成**: 自然で聞き取りやすい音声生成
+- **多様な音声モデル**: 様々なキャラクターや話者の音声に対応
+- **リアルタイム配信対応**: ストリーミング再生で低遅延を実現
+- **豊富なパラメータ調整**: 話速、感情表現、音量などの細かな制御
+- **複数フォーマット対応**: WAV、MP3、FLAC、AAC、Opusに対応
+
+### サービス詳細
+- **公式サイト**: [https://aivis-project.com/cloud-api/](https://aivis-project.com/cloud-api/)
+- **API ドキュメント**: [https://api.aivis-project.com/v1/docs](https://api.aivis-project.com/v1/docs)
+- **APIキー取得**: [https://hub.aivis-project.com/cloud-api/api-keys](https://hub.aivis-project.com/cloud-api/api-keys)
+- **ダッシュボード**: [https://hub.aivis-project.com/](https://hub.aivis-project.com/)
+
+### 対応音声モデル例
+- **mai**: 標準的な女性の声（推奨）
+- **ずんだもん**: 人気キャラクターの声
+- **老当主**: 渋い男性の声
+- **若い男**: 爽やかな男性の声
+
+詳しい音声サンプルや料金については、[公式サイト](https://aivis-project.com/cloud-api/)をご確認ください。
 
 ## セットアップ
 
@@ -69,27 +94,30 @@ AIVIS_DEFAULT_MODEL_UUID=e9339137-2ae3-4d41-9394-fb757a7e61e6  # mai
 ### TTS スクリプト
 
 ```bash
-# テキストから音声合成
-uv run src/aivis-cloud-tts.py --text "こんにちは、世界！"
+# テキストから音声合成（位置引数）
+uv run scripts/say.py "こんにちは、世界！"
 
-# テキストファイルから音声合成
-uv run src/aivis-cloud-tts.py --text-file examples/sample.txt
+# テキストファイルから音声合成（-fオプション）
+uv run scripts/say.py -f examples/sample.txt
 
 # 音声ファイルとして保存
-uv run src/aivis-cloud-tts.py --text "こんにちは" --save-file output.mp3
+uv run scripts/say.py "こんにちは" --save-file output.mp3
 
 # リアルタイムストリーミング再生
-uv run src/aivis-cloud-tts.py --text-file examples/sample.txt --realtime
+uv run scripts/say.py -f examples/sample.txt --realtime
 
 # パラメータ調整
-uv run src/aivis-cloud-tts.py --text "感情豊かに話します" \
+uv run scripts/say.py "感情豊かに話します" \
   --rate 1.2 \
   --intensity 1.5 \
   --volume 1.0 \
   --format mp3
 
 # モデル一覧表示
-uv run src/aivis-cloud-tts.py --list-models
+uv run scripts/say.py --list-models
+
+# 長いテキストの分割処理（3000文字単位）
+uv run scripts/say.py -f examples/long_text.txt --max-chars 3000
 ```
 
 ### シェルスクリプト

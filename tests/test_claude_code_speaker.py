@@ -12,10 +12,8 @@ import pytest
 import tempfile
 import json
 import os
-import threading
-import time
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import sys
 
 # プロジェクトルートをPythonパスに追加
@@ -70,7 +68,7 @@ class TestClaudeResponseWatcherInit:
         Then: 適切な値が設定されている
         """
         # Given/When/Then
-        assert ClaudeResponseWatcher.MAX_TEXT_LENGTH == 2000
+        assert ClaudeResponseWatcher.MAX_TEXT_LENGTH == 3000
         assert ClaudeResponseWatcher.CANCEL_CHECK_INTERVAL == 0.1
         assert ClaudeResponseWatcher.PROCESS_TERMINATION_TIMEOUT == 2
         assert ClaudeResponseWatcher.ESC_KEY_TIMEOUT == 0.3
@@ -90,19 +88,19 @@ class TestClaudeResponseWatcherProcessNewLines:
         with tempfile.TemporaryDirectory() as temp_dir:
             jsonl_file = Path(temp_dir) / "test.jsonl"
             
-            # Claude応答のテストデータ
-            claude_response = {
-                "type": "assistant",
-                "message": {
-                    "content": [{"text": "これはテスト応答です。"}]
-                },
-                "timestamp": "2024-01-01T00:00:00Z"
-            }
-            
-            jsonl_file.write_text(json.dumps(claude_response) + "\n")
-            
             with patch.dict(os.environ, {"AIVIS_API_KEY": "test-key"}):
                 watcher = ClaudeResponseWatcher(temp_dir)
+                
+                # 初期化後にファイルを作成して追加行をシミュレート
+                claude_response = {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"text": "これはテスト応答です。"}]
+                    },
+                    "timestamp": "2024-01-01T00:00:00Z"
+                }
+                
+                jsonl_file.write_text(json.dumps(claude_response) + "\n")
                 
                 with patch.object(watcher, 'handle_claude_response') as mock_handle:
                     
@@ -224,7 +222,7 @@ class TestClaudeResponseWatcherHandleClaudeResponseTts:
 
     def test_短いテキストは単一チャンクで処理される(self):
         """
-        Given: 2000文字以下の短いテキスト
+        Given: 3000文字以下の短いテキスト
         When: handle_claude_response_tts()を実行
         Then: 1つのチャンクとして処理される
         """
@@ -245,13 +243,13 @@ class TestClaudeResponseWatcherHandleClaudeResponseTts:
 
     def test_長いテキストは複数チャンクで処理される(self):
         """
-        Given: 2000文字を超える長いテキスト
+        Given: 3000文字を超える長いテキスト
         When: handle_claude_response_tts()を実行
         Then: 複数のチャンクに分割されて順次処理される
         """
         # Given
         with tempfile.TemporaryDirectory() as temp_dir:
-            long_text = "これは長いテスト文です。" * 200  # 約2400文字
+            long_text = "これは長いテスト文です。" * 300  # 約3600文字
             
             with patch.dict(os.environ, {"AIVIS_API_KEY": "test-key"}):
                 watcher = ClaudeResponseWatcher(temp_dir)

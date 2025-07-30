@@ -23,7 +23,7 @@ from aibis_cloud_tools import AivisCloudTTS, load_env_file, clean_markdown_for_t
 
 class ClaudeResponseWatcher(FileSystemEventHandler):
     # 設定定数
-    MAX_TEXT_LENGTH = 2000                  # テキスト分割の単位（文字数）
+    MAX_TEXT_LENGTH = 3000                  # テキスト分割の単位（文字数）
     CANCEL_CHECK_INTERVAL = 0.1            # キャンセルチェック間隔（秒）
     PROCESS_TERMINATION_TIMEOUT = 2        # プロセス終了タイムアウト（秒）
     ESC_KEY_TIMEOUT = 0.3                  # ESCキー監視タイムアウト（秒）

@@ -221,23 +221,26 @@ class TestLoadEnvFile:
         Then: 環境変数TEST_KEYがtest_valueに設定される
         """
         # Given
-        # load_env_file()の実装を直接テスト（project_rootに.envを配置）
-        original_env_test = os.environ.get("TEST_KEY_FOR_TESTING")
-        original_env_another = os.environ.get("ANOTHER_KEY_FOR_TESTING")
+        # 環境変数をクリーンアップしてから開始
+        test_keys = ["TEST_KEY_FOR_TESTING", "ANOTHER_KEY_FOR_TESTING"]
+        original_values = {}
+        for key in test_keys:
+            original_values[key] = os.environ.get(key)
+            if key in os.environ:
+                del os.environ[key]
         
         with tempfile.TemporaryDirectory() as temp_dir:
             env_file = Path(temp_dir) / ".env"
             env_file.write_text("TEST_KEY_FOR_TESTING=test_value\nANOTHER_KEY_FOR_TESTING=another_value")
             
-            original_cwd = os.getcwd()
-            
             try:
-                os.chdir(temp_dir)
-                
                 # When
-                with patch('aibis_cloud_tools.utils.Path') as mock_path:
-                    # プロジェクトルートを一時ディレクトリに設定
-                    mock_path.return_value = Path(temp_dir)
+                with patch('aibis_cloud_tools.utils.Path') as mock_path_class:
+                    # Path(__file__).parent.parent を一時ディレクトリに設定
+                    from unittest.mock import Mock
+                    mock_path = Mock()
+                    mock_path.parent.parent = Path(temp_dir)
+                    mock_path_class.return_value = mock_path
                     load_env_file()
                 
                 # Then
@@ -245,17 +248,12 @@ class TestLoadEnvFile:
                 assert os.environ.get("ANOTHER_KEY_FOR_TESTING") == "another_value"
                 
             finally:
-                os.chdir(original_cwd)
-                # 環境変数をクリーンアップ
-                if original_env_test is None:
-                    os.environ.pop("TEST_KEY_FOR_TESTING", None)
-                else:
-                    os.environ["TEST_KEY_FOR_TESTING"] = original_env_test
-                    
-                if original_env_another is None:
-                    os.environ.pop("ANOTHER_KEY_FOR_TESTING", None)
-                else:
-                    os.environ["ANOTHER_KEY_FOR_TESTING"] = original_env_another
+                # 環境変数を復元
+                for key, original_value in original_values.items():
+                    if key in os.environ:
+                        del os.environ[key]
+                    if original_value is not None:
+                        os.environ[key] = original_value
 
 
 class TestGetDefaultModel:

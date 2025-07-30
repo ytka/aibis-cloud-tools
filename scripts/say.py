@@ -33,10 +33,9 @@ def main():
     
     parser = argparse.ArgumentParser(description="Aivis Cloud API を使用した音声合成・再生")
 
-    # テキスト入力（どちらか必須）
-    text_group = parser.add_mutually_exclusive_group(required=True)
-    text_group.add_argument("--text", "-t", help="合成するテキスト")
-    text_group.add_argument("--text-file", "-tf", help="テキストファイルのパス")
+    # テキスト入力
+    parser.add_argument("text", nargs="?", help="合成するテキスト（位置引数として指定）")
+    parser.add_argument("-f", "--file", help="テキストファイルのパス（-fオプションで指定）")
     
     parser.add_argument("--api-key", "-k", help="API キー（環境変数 AIVIS_API_KEY からも取得可能）")
 
@@ -60,8 +59,8 @@ def main():
     parser.add_argument("--no-wait", action="store_true", help="音声再生の終了を待たない（バックグラウンド再生）")
     
     # 長いテキスト分割オプション
-    parser.add_argument("--max-chars", type=int, default=2000,
-                       help="長いテキストの分割単位（デフォルト: 2000文字）")
+    parser.add_argument("--max-chars", type=int, default=3000,
+                       help="長いテキストの分割単位（デフォルト: 3000文字）")
     parser.add_argument("--split-pause", type=float, default=0,
                        help="分割間の一時停止秒数（デフォルト: 0秒）")
     parser.add_argument("--list-models", action="store_true", help="利用可能なモデル一覧を表示")
@@ -79,22 +78,26 @@ def main():
         client = AivisCloudTTS(api_key)
 
         # テキストの取得
-        if args.text_file:
+        if args.file:
             try:
-                with open(args.text_file, 'r', encoding='utf-8') as f:
+                with open(args.file, 'r', encoding='utf-8') as f:
                     text_content = f.read().strip()
                 if not text_content:
                     print("エラー: テキストファイルが空です")
                     sys.exit(1)
-                print(f"テキストファイル '{args.text_file}' を読み込みました")
+                print(f"テキストファイル '{args.file}' を読み込みました")
             except FileNotFoundError:
-                print(f"エラー: テキストファイル '{args.text_file}' が見つかりません")
+                print(f"エラー: テキストファイル '{args.file}' が見つかりません")
                 sys.exit(1)
             except UnicodeDecodeError:
-                print(f"エラー: テキストファイル '{args.text_file}' の文字エンコーディングが不正です")
+                print(f"エラー: テキストファイル '{args.file}' の文字エンコーディングが不正です")
                 sys.exit(1)
-        else:
+        elif args.text:
             text_content = args.text
+        else:
+            print("エラー: テキストまたはファイル（-f）を指定してください")
+            parser.print_help()
+            sys.exit(1)
         
         # 長いテキストの分割処理
         text_chunks = split_text_smart(text_content, args.max_chars)
