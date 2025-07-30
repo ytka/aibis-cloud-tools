@@ -19,14 +19,15 @@ from watchdog.events import FileSystemEventHandler
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from aibis_cloud_tools import AivisCloudTTS, load_env_file, clean_markdown_for_tts, get_default_model
+from aibis_cloud_tools import AivisCloudTTS, load_env_file, clean_markdown_for_tts, get_default_model, split_text_smart
 
 class ClaudeResponseWatcher(FileSystemEventHandler):
     # 設定定数
-    MAX_TEXT_LENGTH = 2000                  # 読み上げテキストの最大文字数
+    MAX_TEXT_LENGTH = 2000                  # テキスト分割の単位（文字数）
     CANCEL_CHECK_INTERVAL = 0.1            # キャンセルチェック間隔（秒）
     PROCESS_TERMINATION_TIMEOUT = 2        # プロセス終了タイムアウト（秒）
     ESC_KEY_TIMEOUT = 0.3                  # ESCキー監視タイムアウト（秒）
+    SPLIT_PAUSE = 0.5                      # 分割間の一時停止秒数
     
     def __init__(self, watch_dir):
         self.watch_dir = Path(watch_dir).expanduser()
@@ -60,7 +61,7 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
     def _kill_current_tts(self):
         """現在のTTSプロセスを終了（個別プロセスのみ）"""
         with self.process_lock:
-            if self._has_active_tts_process():
+            if self._has_active_tts_process() and self.current_tts_process is not None:
                 print("🛑 TTS再生をキャンセルしています...")
                 try:
                     # プロセスグループではなく、個別プロセスのみを終了
@@ -282,14 +283,26 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     self._send_notification("Claude応答を検出しました（API KEY未設定）")
                     return
                 
-                # 長すぎる場合は最初の指定文字数のみ読み上げ
-                truncated_content = content[:self.MAX_TEXT_LENGTH] if len(content) > self.MAX_TEXT_LENGTH else content
+                # 長いテキストを分割して処理
+                text_chunks = split_text_smart(content, self.MAX_TEXT_LENGTH)
                 
-                # Markdown記法をクリーニング
-                read_content = clean_markdown_for_tts(truncated_content)
+                if len(text_chunks) > 1:
+                    print(f"📝 テキストを{len(text_chunks)}個のチャンクに分割しました（{self.MAX_TEXT_LENGTH}文字単位）")
                 
-                # TTSライブラリで読み上げ
-                self._play_with_library(read_content)
+                # 各チャンクを順次読み上げ（同期実行）
+                for i, chunk_text in enumerate(text_chunks, 1):
+                    # Markdown記法をクリーニング
+                    read_content = clean_markdown_for_tts(chunk_text)
+                    
+                    print(f"🔊 [{i}/{len(text_chunks)}] チャンク読み上げ中... ({len(chunk_text)}文字)")
+                    
+                    # TTSライブラリで同期読み上げ（前の再生が完了してから次へ）
+                    self._play_with_library_sync(read_content)
+                    
+                    # 最後のチャンクでない場合は短時間待機
+                    if i < len(text_chunks):
+                        print(f"⏸️  {self.SPLIT_PAUSE}秒間一時停止...")
+                        time.sleep(self.SPLIT_PAUSE)
                     
             except Exception as tts_error:
                 print(f"⚠️  TTS読み上げエラー: {tts_error}")
@@ -308,7 +321,7 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         return self.tts_client
     
     def _play_with_library(self, text):
-        """ライブラリの非同期再生機能を使用して音声再生"""
+        """ライブラリの非同期再生機能を使用して音声再生（単一チャンク用）"""
         print(f"🔊 Aivis Cloud TTS（ライブラリ）で読み上げ開始: {text[:50]}...")
         
         def play_audio_thread():
@@ -386,6 +399,80 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         # バックグラウンドで再生
         audio_thread = threading.Thread(target=play_audio_thread, daemon=True)
         audio_thread.start()
+    
+    def _play_with_library_sync(self, text):
+        """ライブラリの同期再生機能を使用して音声再生（マルチチャンク用）"""
+        print(f"🔊 Aivis Cloud TTS（同期）で読み上げ開始: {text[:50]}...")
+        
+        temp_file_path = None
+        proc = None
+        
+        def cleanup_temp_file():
+            """一時ファイルの確実なクリーンアップ"""
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                except (OSError, PermissionError):
+                    # ファイル削除エラーは無視して継続
+                    pass
+        
+        try:
+            client = self._get_tts_client()
+            print(f"🔊 音声合成中... ({len(text)}文字)")
+            
+            audio_data = client.synthesize_speech(
+                text=text,
+                model_uuid=get_default_model(),
+                volume=1.0
+            )
+            
+            print(f"🎵 音声再生中... ({len(audio_data)} bytes)")
+            
+            # 非同期再生でプロセスオブジェクトを取得
+            proc, temp_file_path = client.play_audio_async(audio_data)
+            
+            with self.process_lock:
+                self.current_tts_process = proc
+            
+            # プロセスの完了を同期的に待機（キャンセル可能）
+            should_continue = True
+            while should_continue:
+                if proc.poll() is not None:
+                    # プロセス完了
+                    break
+                
+                # キャンセルチェック（原子的操作）
+                with self.process_lock:
+                    should_continue = (self.current_tts_process == proc)
+                
+                if not should_continue:
+                    # 別のプロセスに置き換えられた（キャンセルされた）場合
+                    if proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=self.PROCESS_TERMINATION_TIMEOUT)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                    # キャンセル時も一時ファイルをクリーンアップ
+                    cleanup_temp_file()
+                    return
+                
+                # 短時間待機
+                time.sleep(self.CANCEL_CHECK_INTERVAL)
+            
+            # 再生完了
+            print(f"💾 音声ファイル: {temp_file_path}")
+            print("✅ 音声再生が完了しました")
+                    
+        except Exception as e:
+            print(f"⚠️  ライブラリTTSエラー: {e}")
+        finally:
+            # 一時ファイルのクリーンアップ
+            cleanup_temp_file()
+            
+            with self.process_lock:
+                if self.current_tts_process == proc:
+                    self.current_tts_process = None
     
     
     

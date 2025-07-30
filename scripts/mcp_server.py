@@ -150,49 +150,70 @@ async def handle_call_tool(
                 if not segment["text"]:
                     continue
                 
-                # Synthesize and play audio for this segment using AivisCloudTTS
-                tts_client = get_tts_client()
-                audio_data = tts_client.synthesize_speech(
-                    text=segment["text"],
-                    model_uuid=segment["model_uuid"] or get_default_model(),
-                    emotional_intensity=segment["emotional_intensity"],
-                    volume=segment["volume"]
-                )
+                # 長いテキストの場合は分割処理
+                text_chunks = split_text_smart(segment["text"], 2000)
                 
-                # Play audio using the TTS client (非同期再生)
-                try:
-                    proc, temp_file = tts_client.play_audio_async(audio_data, "mp3")
+                if len(text_chunks) > 1:
+                    print(f"📝 セグメント{i}: テキストを{len(text_chunks)}個のチャンクに分割")
+                
+                # 各チャンクを順次処理
+                chunk_results = []
+                segment_audio_size = 0
+                
+                for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+                    # Synthesize and play audio for this chunk using AivisCloudTTS
+                    tts_client = get_tts_client()
+                    audio_data = tts_client.synthesize_speech(
+                        text=chunk_text,
+                        model_uuid=segment["model_uuid"] or get_default_model(),
+                        emotional_intensity=segment["emotional_intensity"],
+                        volume=segment["volume"]
+                    )
+                    
+                    # Play audio using the TTS client (非同期再生)
                     try:
-                        proc.wait()  # プロセス完了を待機
-                        play_result = {"status": "completed", "message": "Audio playback completed"}
-                    except Exception as wait_error:
+                        proc, temp_file = tts_client.play_audio_async(audio_data, "mp3")
+                        try:
+                            proc.wait()  # プロセス完了を待機
+                            play_result = {"status": "completed", "message": f"Chunk {chunk_idx}/{len(text_chunks)} playback completed"}
+                        except Exception as wait_error:
+                            play_result = {
+                                "status": "error", 
+                                "message": f"Chunk {chunk_idx}/{len(text_chunks)} playback wait failed: {str(wait_error)}",
+                                "audio_size": len(audio_data)
+                            }
+                        finally:
+                            # 一時ファイルのクリーンアップ
+                            if temp_file and os.path.exists(temp_file):
+                                try:
+                                    os.unlink(temp_file)
+                                except OSError:
+                                    pass
+                    except Exception as e:
                         play_result = {
                             "status": "error", 
-                            "message": f"Audio playback wait failed: {str(wait_error)}",
+                            "message": f"Chunk {chunk_idx}/{len(text_chunks)} playback failed: {str(e)}",
                             "audio_size": len(audio_data)
                         }
-                    finally:
-                        # 一時ファイルのクリーンアップ
-                        if temp_file and os.path.exists(temp_file):
-                            try:
-                                os.unlink(temp_file)
-                            except OSError:
-                                pass
-                except Exception as e:
-                    play_result = {
-                        "status": "error", 
-                        "message": f"Audio playback failed: {str(e)}",
-                        "audio_size": len(audio_data)
+                    
+                    chunk_result = {
+                        "chunk": chunk_idx,
+                        "text": chunk_text,
+                        "audio_size": len(audio_data),
+                        "playback_result": play_result
                     }
+                    chunk_results.append(chunk_result)
+                    segment_audio_size += len(audio_data)
                 
                 segment_result = {
                     "segment": i,
                     "text": segment["text"],
-                    "audio_size": len(audio_data),
-                    "playback_result": play_result
+                    "chunks_count": len(text_chunks),
+                    "audio_size": segment_audio_size,
+                    "chunks": chunk_results
                 }
                 results.append(segment_result)
-                total_audio_size += len(audio_data)
+                total_audio_size += segment_audio_size
             
             final_result = {
                 "success": True,
