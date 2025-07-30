@@ -10,6 +10,7 @@ import subprocess
 import shlex
 import os
 import sys
+import signal
 import threading
 from pathlib import Path
 from watchdog.observers import Observer
@@ -64,7 +65,7 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         return None
     
     def _kill_current_tts(self):
-        """現在のTTS再生を停止"""
+        """現在のTTS再生を停止（子プロセスも含めて確実に終了）"""
         with self.process_lock:
             if self.current_tts_process and self.current_tts_process.poll() is None:
                 try:
@@ -76,12 +77,22 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                         except subprocess.TimeoutExpired:
                             self.current_tts_process.kill()
                     else:
-                        # Unix系: プロセスを終了
-                        self.current_tts_process.terminate()
+                        # Unix系: プロセスグループ全体を終了（uv runとその子プロセスを確実に終了）
                         try:
-                            self.current_tts_process.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            self.current_tts_process.kill()
+                            import signal
+                            pgid = os.getpgid(self.current_tts_process.pid)
+                            os.killpg(pgid, signal.SIGTERM)
+                            try:
+                                self.current_tts_process.wait(timeout=2)
+                            except subprocess.TimeoutExpired:
+                                os.killpg(pgid, signal.SIGKILL)
+                        except (OSError, ProcessLookupError):
+                            # プロセスグループがない場合は通常の終了を試行
+                            self.current_tts_process.terminate()
+                            try:
+                                self.current_tts_process.wait(timeout=2)
+                            except subprocess.TimeoutExpired:
+                                self.current_tts_process.kill()
                     
                     print("🛑 前の音声再生をキャンセルしました")
                     self.is_playing = False
@@ -299,13 +310,25 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     with self.process_lock:
                         self.is_playing = True
                         
-                        # 子プロセスを親と同じプロセスグループで実行
-                        self.current_tts_process = subprocess.Popen(
-                            cmd, 
-                            stdout=subprocess.DEVNULL, 
-                            stderr=subprocess.DEVNULL,
-                            env=env
-                        )
+                        # 新しいプロセスグループで実行（子プロセスを確実に終了させるため）
+                        if sys.platform == "win32":
+                            # Windows: CREATE_NEW_PROCESS_GROUP フラグを使用
+                            self.current_tts_process = subprocess.Popen(
+                                cmd, 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.DEVNULL,
+                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                                env=env
+                            )
+                        else:
+                            # Unix系: 新しいプロセスグループを作成
+                            self.current_tts_process = subprocess.Popen(
+                                cmd, 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.DEVNULL,
+                                preexec_fn=os.setsid,
+                                env=env
+                            )
                     
                     print(f"🔊 Aivis Cloud TTSで読み上げ開始: {read_content[:50]}...")
                     print(f"🔧 実行コマンド: {' '.join(shlex.quote(arg) for arg in cmd)}")
