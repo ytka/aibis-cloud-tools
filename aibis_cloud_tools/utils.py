@@ -31,6 +31,8 @@ def load_env_file():
 
 def split_text_smart(text, max_chars=2000):
     """テキストを賢く分割する（文章境界を考慮）"""
+    if not text:  # 空文字列チェックを追加
+        return []
     if len(text) <= max_chars:
         return [text]
     
