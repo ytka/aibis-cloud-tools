@@ -73,7 +73,16 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
     def _kill_current_tts(self):
         """現在のTTS再生を停止（子プロセスも含めて確実に終了）"""
         with self.process_lock:
-            if self.current_tts_process and self.current_tts_process.poll() is None:
+            # ライブラリ使用時の処理
+            if self.current_tts_process == "library_thread":
+                print("🛑 ライブラリTTS再生をキャンセルしています...")
+                self.is_playing = False
+                self.current_tts_process = None
+                print("🛑 ライブラリTTS再生をキャンセルしました")
+                return
+            
+            # 従来のプロセス終了処理
+            if self.current_tts_process and hasattr(self.current_tts_process, 'poll') and self.current_tts_process.poll() is None:
                 try:
                     if sys.platform == "win32":
                         # Windows: プロセスを終了
@@ -336,23 +345,48 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         """ライブラリを直接使用して音声再生"""
         with self.process_lock:
             self.is_playing = True
+            # スレッドオブジェクトを current_tts_process として保存
+            # これにより _kill_current_tts() で適切に停止できる
+            self.current_tts_process = "library_thread"
         
         print(f"🔊 Aivis Cloud TTS（ライブラリ）で読み上げ開始: {text[:50]}...")
         
         def play_audio_thread():
             try:
+                # 開始時に再度チェック（キャンセルされていないか）
+                with self.process_lock:
+                    if not self.is_playing:
+                        return
+                
                 client = self._get_tts_client()
                 print(f"🔊 音声合成中... ({len(text)}文字)")
+                
+                # キャンセルチェック
+                with self.process_lock:
+                    if not self.is_playing:
+                        return
+                
                 audio_data = client.synthesize_speech(
                     text=text,
                     model_uuid=get_default_model(),
                     volume=1.0
                 )
+                
+                # キャンセルチェック
+                with self.process_lock:
+                    if not self.is_playing:
+                        return
+                
                 print(f"🎵 音声再生中... ({len(audio_data)} bytes)")
                 temp_file = client.play_audio(audio_data)
-                if temp_file:
-                    print(f"💾 音声ファイル: {temp_file}")
-                print("✅ 音声再生が完了しました")
+                
+                # 再生完了後の最終チェック
+                with self.process_lock:
+                    if self.is_playing:  # まだキャンセルされていない場合のみ完了メッセージ
+                        if temp_file:
+                            print(f"💾 音声ファイル: {temp_file}")
+                        print("✅ 音声再生が完了しました")
+                        
             except Exception as e:
                 print(f"⚠️  ライブラリTTSエラー: {e}")
             finally:
@@ -361,7 +395,11 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     self.current_tts_process = None
         
         # バックグラウンドで再生
-        threading.Thread(target=play_audio_thread, daemon=True).start()
+        audio_thread = threading.Thread(target=play_audio_thread, daemon=True)
+        # スレッドオブジェクトを保存（将来的な拡張用）
+        with self.process_lock:
+            self.current_audio_thread = audio_thread
+        audio_thread.start()
     
     def _play_with_script(self, text):
         """スクリプト経由で音声再生（フォールバック）"""
