@@ -34,7 +34,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
         
-        # TTS設定
+        # TTS設定（初期化時にAPIキーをチェック）
+        self.api_key = os.getenv("AIVIS_API_KEY")
         self.tts_client = None
         
         # 既存ファイルの行数を初期化
@@ -89,26 +90,34 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         try:
             import select
             import termios
+            from contextlib import contextmanager
             
-            # 設定を保存
-            old_settings = termios.tcgetattr(sys.stdin)
+            @contextmanager
+            def raw_terminal():
+                """ターミナル設定の確実な復元を保証するcontext manager"""
+                old_settings = termios.tcgetattr(sys.stdin)
+                try:
+                    # 最小限の設定変更でrawモードに近づける
+                    new_settings = old_settings[:]
+                    new_settings[3] &= ~(termios.ICANON | termios.ECHO)  # カノニカル＆エコー無効
+                    new_settings[6][termios.VMIN] = 1     # 最低1文字
+                    new_settings[6][termios.VTIME] = 0    # タイムアウトなし
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, new_settings)
+                    yield old_settings
+                finally:
+                    # 設定を確実に復元
+                    try:
+                        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                    except:
+                        pass  # 復元に失敗してもプログラムは継続
             
-            try:
-                # 最小限の設定変更でrawモードに近づける
-                new_settings = old_settings[:]
-                new_settings[3] &= ~(termios.ICANON | termios.ECHO)  # カノニカル＆エコー無効
-                new_settings[6][termios.VMIN] = 1     # 最低1文字
-                new_settings[6][termios.VTIME] = 0    # タイムアウトなし
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, new_settings)
-                
+            with raw_terminal() as old_settings:
                 while True:
                     # 入力待機（短時間タイムアウト）
                     if select.select([sys.stdin], [], [], 0.3)[0]:
                         try:
                             char = sys.stdin.read(1)
                             if char and ord(char) == 27:  # ESC = 0x1b = 27
-                                # エコーを手動で復元して出力
-                                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
                                 if self._has_active_tts_process():
                                     print("\n⌨️  ESCキー検出 - 音声をキャンセル中...")
                                     sys.stdout.flush()
@@ -116,17 +125,11 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                                 else:
                                     print("\n⌨️  ESCキー検出（再生中ではありません）")
                                     sys.stdout.flush()
-                                # 設定を再適用
-                                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, new_settings)
                                 
                         except (OSError, IOError, ValueError):
                             continue
                         except (EOFError, KeyboardInterrupt):
                             break
-                            
-            finally:
-                # 必ず元の設定に復元
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
                         
         except (ImportError, OSError):
             # termios等が利用できない環境
@@ -251,9 +254,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
             
             # 🔊 Aivis Cloud TTSで読み上げ
             try:
-                # APIキーの確認
-                api_key = os.getenv("AIVIS_API_KEY")
-                if not api_key:
+                # APIキーの確認（初期化時にチェック済み）
+                if not self.api_key:
                     print("⚠️  AIVIS_API_KEYが設定されていないため、読み上げをスキップします")
                     self._send_notification("Claude応答を検出しました（API KEY未設定）")
                     return
@@ -279,10 +281,9 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
     def _get_tts_client(self):
         """TTSクライアントを取得（キャッシュ付き）"""
         if self.tts_client is None:
-            api_key = os.getenv("AIVIS_API_KEY")
-            if not api_key:
+            if not self.api_key:
                 raise ValueError("AIVIS_API_KEY environment variable is required")
-            self.tts_client = AivisCloudTTS(api_key)
+            self.tts_client = AivisCloudTTS(self.api_key)
         return self.tts_client
     
     def _play_with_library(self, text):
@@ -292,6 +293,15 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         def play_audio_thread():
             temp_file_path = None
             proc = None
+            
+            def cleanup_temp_file():
+                """一時ファイルの確実なクリーンアップ"""
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.unlink(temp_file_path)
+                    except OSError:
+                        pass
+            
             try:
                 client = self._get_tts_client()
                 print(f"🔊 音声合成中... ({len(text)}文字)")
@@ -311,22 +321,27 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     self.current_tts_process = proc
                 
                 # プロセスの完了を監視（キャンセル可能）
-                while True:
+                should_continue = True
+                while should_continue:
                     if proc.poll() is not None:
                         # プロセス完了
                         break
                     
-                    # キャンセルチェック（短い間隔で）
+                    # キャンセルチェック（原子的操作）
                     with self.process_lock:
-                        if self.current_tts_process != proc:
-                            # 別のプロセスに置き換えられた（キャンセルされた）場合
-                            if proc and proc.poll() is None:
-                                proc.terminate()
-                                try:
-                                    proc.wait(timeout=2)
-                                except subprocess.TimeoutExpired:
-                                    proc.kill()
-                            return
+                        should_continue = (self.current_tts_process == proc)
+                    
+                    if not should_continue:
+                        # 別のプロセスに置き換えられた（キャンセルされた）場合
+                        if proc.poll() is None:
+                            proc.terminate()
+                            try:
+                                proc.wait(timeout=2)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+                        # キャンセル時も一時ファイルをクリーンアップ
+                        cleanup_temp_file()
+                        return
                     
                     # 短時間待機
                     import time
@@ -340,11 +355,7 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 print(f"⚠️  ライブラリTTSエラー: {e}")
             finally:
                 # 一時ファイルのクリーンアップ
-                if temp_file_path and os.path.exists(temp_file_path):
-                    try:
-                        os.unlink(temp_file_path)
-                    except OSError:
-                        pass
+                cleanup_temp_file()
                 
                 with self.process_lock:
                     if self.current_tts_process == proc:
@@ -436,8 +447,7 @@ def main():
     signal.signal(signal.SIGTERM, graceful_shutdown)  # 終了シグナル
     
     # TTS設定の確認
-    api_key = os.getenv("AIVIS_API_KEY")
-    if api_key:
+    if event_handler.api_key:
         print("🔊 TTS: Aivis Cloud ライブラリ使用")
     else:
         print("⚠️  TTSが設定されていません。通知のみ行います。")
