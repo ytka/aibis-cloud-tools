@@ -91,7 +91,7 @@ AIVIS_DEFAULT_MODEL_UUID=e9339137-2ae3-4d41-9394-fb757a7e61e6  # mai
 
 ## 使用方法
 
-### TTS スクリプト
+### say.py - メインTTSスクリプト
 
 ```bash
 # テキストから音声合成（位置引数）
@@ -120,29 +120,23 @@ uv run scripts/say.py --list-models
 uv run scripts/say.py -f examples/long_text.txt --max-chars 3000
 ```
 
-### シェルスクリプト
+### claude_code_speaker.py - Claude応答監視
 
-便利なシェルスクリプトが用意されています：
+Claude Codeの応答を自動監視・読み上げするスクリプト：
 
 ```bash
-# 簡単な音声合成
-scripts/speak.sh "こんにちは"
-scripts/speak.sh examples/sample.txt
-
-# 長いテキストの分割読み上げ
-scripts/speak_long.sh examples/sample.txt
-
-# デバッグ用スクリプト
-scripts/debug_speak.sh examples/sample.txt
-
-# Claude Code応答監視（自動読み上げ）
-python scripts/claude-code-speaker.py
-
 # uvで実行（推奨）
-uv run scripts/claude-code-speaker.py
+uv run scripts/claude_code_speaker.py
+
+# 手動で依存関係をインストールして実行
+pip install watchdog
+python scripts/claude_code_speaker.py
 
 # カスタム設定で実行
-python scripts/claude-code-speaker.py --tts-script scripts/speak.sh --watch-dir ~/.claude/projects
+python scripts/claude_code_speaker.py --watch-dir ~/.claude/projects
+
+# ヘルプ表示
+uv run scripts/claude_code_speaker.py --help
 ```
 
 ### Claude Code応答監視
@@ -171,27 +165,27 @@ uv run scripts/claude-code-speaker.py --help
 **環境変数**:
 - `CLAUDE_WATCH_DIR`: Claude Codeの監視ディレクトリ
 
-### MCPサーバー
+### mcp_server.py - MCPサーバー
 
 ```bash
 # MCPサーバー起動
-uv run src/run_mcp_server.py
+uv run scripts/mcp_server.py
 
 # デバッグモード（詳細ログ出力）
-MCP_DEBUG=true uv run src/run_mcp_server.py
+MCP_DEBUG=true uv run scripts/mcp_server.py
 ```
 
 ### mcp tools との連携
 
 ```bash
 # ツール一覧表示
-mcp tools uv run --directory /path/to/project src/run_mcp_server.py
+mcp tools uv run --directory /path/to/project scripts/mcp_server.py
 
-# 音声合成実行（同期モード）
-mcp call speak --params '{"text":"こんにちは"}' uv run --directory /path/to/project src/run_mcp_server.py
+# 音声合成実行（単一テキスト）
+mcp call speak --params '{"text":"こんにちは"}' uv run --directory /path/to/project scripts/mcp_server.py
 
-# 音声合成実行（非同期モード）
-mcp call speak --params '{"text":"こんにちは","async_mode":true}' uv run --directory /path/to/project src/run_mcp_server.py
+# 音声合成実行（複数テキスト）
+mcp call speak --params '{"speaks":[{"text":"こんにちは"},{"text":"さようなら"}]}' uv run --directory /path/to/project scripts/mcp_server.py
 ```
 
 ## MCPサーバーのパラメータ
@@ -227,7 +221,7 @@ notepad %APPDATA%\Claude\claude_desktop_config.json
         "run",
         "--directory",
         "/path/to/your/project/directory",
-        "src/run_mcp_server.py"
+        "scripts/mcp_server.py"
       ],
       "env": {
         "AIVIS_API_KEY": "your_actual_api_key_here"
@@ -266,24 +260,27 @@ Claude Desktop で以下のように依頼できます：
 
 ```
 aibis-cloud-tools/
-├── src/                    # メインソースコード
-│   ├── aivis-cloud-tts.py # メイン TTS スクリプト
-│   └── run_mcp_server.py  # MCP サーバー（公式フレームワーク使用）
-├── scripts/               # シェルスクリプト群
-│   ├── speak.sh          # 簡単読み上げスクリプト
-│   ├── speak_long.sh     # 長文分割読み上げスクリプト
-│   ├── debug_speak.sh    # デバッグ用スクリプト
-│   ├── claude-code-speaker.py # Claude Code応答監視スクリプト
-│   └── README.md         # スクリプトの詳細説明
-├── examples/              # 使用例・サンプルファイル
-│   └── sample.txt        # サンプルテキストファイル
-├── tests/                 # テストファイル
-│   └── test_mcp.sh       # MCPサーバーテストスクリプト
-├── docs/                  # ドキュメント
-├── tmp/                   # 一時ファイル
-├── .env.example          # 環境変数テンプレート
-├── pyproject.toml        # uv 設定ファイル
-└── README.md             # このファイル
+├── aibis_cloud_tools/     # メインライブラリパッケージ
+│   ├── __init__.py       # パッケージ初期化
+│   ├── tts.py           # AivisCloudTTSクラス
+│   └── utils.py         # ユーティリティ関数
+├── scripts/              # 実行可能スクリプト
+│   ├── say.py           # メインTTSスクリプト
+│   ├── claude_code_speaker.py # Claude応答監視スクリプト
+│   ├── mcp_server.py    # MCPサーバー
+│   └── README.md        # スクリプト詳細説明
+├── tests/               # テストスイート
+│   ├── test_tts.py      # TTSクラステスト
+│   ├── test_utils.py    # ユーティリティテスト
+│   ├── test_claude_code_speaker.py # 監視スクリプトテスト
+│   ├── test_mcp_server.py # MCPサーバーテスト
+│   └── test_mcp.sh      # MCPサーバー手動テスト
+├── examples/            # 使用例・サンプルファイル
+│   └── sample.txt      # サンプルテキストファイル
+├── .env.example        # 環境変数テンプレート
+├── pyproject.toml      # uv設定ファイル・依存関係
+├── uv.lock            # 依存関係ロックファイル
+└── README.md          # このファイル
 ```
 
 ## 対応音声フォーマット
@@ -295,6 +292,53 @@ aibis-cloud-tools/
 | MP3 | .mp3 | 汎用性が高い・ストリーミング再生対応 |
 | AAC | .aac | MP3より高効率・多くのデバイスで対応 |
 | Opus | .ogg | 最高圧縮効率・低遅延 |
+
+## 開発・テスト
+
+### テストの実行
+
+```bash
+# 全テストの実行
+python -m pytest tests/ -v
+
+# 特定のテストファイルのみ実行
+python -m pytest tests/test_tts.py -v
+
+# カバレッジ付きでテスト実行
+python -m pytest tests/ --cov=aibis_cloud_tools --cov-report=html
+
+# テスト並列実行（高速化）
+python -m pytest tests/ -n auto
+```
+
+### テスト構成
+
+- **61個のテスト** で包括的にカバー
+- **Given-When-Then** 構造でテスト記述
+- **Mock** を使用した外部API呼び出しの分離
+- **pytest** + **pytest-asyncio** でテストフレームワーク構成
+
+### 依存関係管理
+
+```bash
+# 依存関係のインストール
+uv sync
+
+# 依存関係の追加
+uv add package_name
+
+# 開発用依存関係の追加  
+uv add --dev package_name
+
+# 依存関係の更新
+uv lock --upgrade
+```
+
+### プロジェクト構造
+
+- **aibis_cloud_tools/**: Pythonパッケージ（ライブラリコード）
+- **scripts/**: 実行可能スクリプト（CLIツール）
+- **tests/**: テストスイート（単体・統合テスト）
 
 ## トラブルシューティング
 
@@ -314,7 +358,20 @@ aibis-cloud-tools/
 
 ```bash
 # 詳細なログ出力を有効にする
-MCP_DEBUG=true uv run run_mcp_server.py
+MCP_DEBUG=true uv run scripts/mcp_server.py
+```
+
+### テストが失敗する場合
+
+```bash
+# 依存関係の再インストール
+uv sync --force
+
+# テスト環境のクリーンアップ
+rm -rf .pytest_cache __pycache__ tests/__pycache__
+
+# 個別テストのデバッグ実行
+python -m pytest tests/test_tts.py::TestAivisCloudTTSInit::test_正常なAPIキーで初期化できる -v -s
 ```
 
 ## 関連リンク
