@@ -22,6 +22,12 @@ sys.path.insert(0, str(project_root))
 from aibis_cloud_tools import AivisCloudTTS, load_env_file, clean_markdown_for_tts, get_default_model
 
 class ClaudeResponseWatcher(FileSystemEventHandler):
+    # 設定定数
+    MAX_TEXT_LENGTH = 2000                  # 読み上げテキストの最大文字数
+    CANCEL_CHECK_INTERVAL = 0.1            # キャンセルチェック間隔（秒）
+    PROCESS_TERMINATION_TIMEOUT = 2        # プロセス終了タイムアウト（秒）
+    ESC_KEY_TIMEOUT = 0.3                  # ESCキー監視タイムアウト（秒）
+    
     def __init__(self, watch_dir):
         self.watch_dir = Path(watch_dir).expanduser()
         self.processed_lines = {}  # ファイルごとの処理済み行数
@@ -69,8 +75,10 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 except (ProcessLookupError, OSError):
                     # プロセスが既に終了している場合
                     pass
-                except Exception as e:
+                except (PermissionError, subprocess.SubprocessError) as e:
                     print(f"⚠️  音声キャンセルエラー: {e}")
+                except Exception as e:
+                    print(f"⚠️  予期しないキャンセルエラー: {e}")
                     
                 self.current_tts_process = None
     
@@ -111,10 +119,10 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     except:
                         pass  # 復元に失敗してもプログラムは継続
             
-            with raw_terminal() as old_settings:
+            with raw_terminal():
                 while True:
                     # 入力待機（短時間タイムアウト）
-                    if select.select([sys.stdin], [], [], 0.3)[0]:
+                    if select.select([sys.stdin], [], [], self.ESC_KEY_TIMEOUT)[0]:
                         try:
                             char = sys.stdin.read(1)
                             if char and ord(char) == 27:  # ESC = 0x1b = 27
@@ -127,8 +135,10 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                                     sys.stdout.flush()
                                 
                         except (OSError, IOError, ValueError):
+                            # 入力読み取りエラーは継続
                             continue
                         except (EOFError, KeyboardInterrupt):
+                            # 終了シグナルでループを抜ける
                             break
                         
         except (ImportError, OSError):
@@ -142,48 +152,60 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         """既存のJSONLファイルの行数を記録（起動時の重複処理を防ぐ）"""
         for jsonl_file in self.watch_dir.glob('**/*.jsonl'):
             try:
-                with open(jsonl_file, 'r') as f:
-                    self.processed_lines[str(jsonl_file)] = len(f.readlines())
+                # メモリ効率的な行数カウント
+                line_count = 0
+                with open(jsonl_file, 'r', encoding='utf-8') as f:
+                    for line_count, _ in enumerate(f, 1):
+                        pass  # 行数のみカウント
+                self.processed_lines[str(jsonl_file)] = line_count
+            except (IOError, OSError, PermissionError) as e:
+                print(f"⚠️  ファイル読み取りエラー {jsonl_file}: {e}")
             except Exception as e:
-                print(f"⚠️  初期化エラー {jsonl_file}: {e}")
+                print(f"⚠️  予期しない初期化エラー {jsonl_file}: {e}")
     
     def on_modified(self, event):
-        if event.src_path.endswith('.jsonl'):
+        if str(event.src_path).endswith('.jsonl'):
             self.process_new_lines(event.src_path)
     
     def on_created(self, event):
-        if event.src_path.endswith('.jsonl'):
+        if str(event.src_path).endswith('.jsonl'):
             # 新しいファイルが作成された場合
             self.processed_lines[event.src_path] = 0
             self.process_new_lines(event.src_path)
     
     def process_new_lines(self, file_path):
-        file_path = Path(file_path)
-        
+        """新しい行を処理してClaude応答を検出（メモリ効率版）"""
         try:
+            file_path = Path(file_path)
+            file_key = str(file_path)
+            
+            # 前回処理した行数を取得
+            last_processed = self.processed_lines.get(file_key, 0)
+            current_line_num = 0
+            
+            # ファイルを行単位で読み込み（メモリ効率）
             with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        except Exception as e:
+                for current_line_num, line in enumerate(f, 1):
+                    # 新しい行のみ処理
+                    if current_line_num > last_processed:
+                        line = line.strip()
+                        if line:  # 空行をスキップ
+                            try:
+                                data = json.loads(line)
+                                # Claudeの応答のみ処理
+                                if data.get('type') == 'assistant':
+                                    self.handle_claude_response(data, file_path)
+                            except json.JSONDecodeError as e:
+                                print(f"⚠️  JSON解析エラー: {e}")
+                                continue
+            
+            # 処理済み行数を更新
+            self.processed_lines[file_key] = current_line_num
+            
+        except (IOError, OSError, PermissionError) as e:
             print(f"❌ ファイル読み込みエラー {file_path}: {e}")
-            return
-        
-        # 前回処理済み行数を取得
-        last_processed = self.processed_lines.get(str(file_path), 0)
-        new_lines = lines[last_processed:]
-        
-        for line in new_lines:
-            if line.strip():
-                try:
-                    data = json.loads(line)
-                    # Claudeの応答のみ処理
-                    if data.get('type') == 'assistant':
-                        self.handle_claude_response(data, file_path)
-                except json.JSONDecodeError as e:
-                    print(f"⚠️  JSON解析エラー: {e}")
-                    continue
-        
-        # 処理済み行数を更新
-        self.processed_lines[str(file_path)] = len(lines)
+        except Exception as e:
+            print(f"❌ 予期しない処理エラー {file_path}: {e}")
     
     def handle_claude_response(self, data, file_path):
         """Claudeの応答が検出されたときの処理"""
@@ -260,9 +282,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     self._send_notification("Claude応答を検出しました（API KEY未設定）")
                     return
                 
-                # 長すぎる場合は最初の2000文字のみ読み上げ（より安全なサイズ）
-                max_length = 2000
-                truncated_content = content[:max_length] if len(content) > max_length else content
+                # 長すぎる場合は最初の指定文字数のみ読み上げ
+                truncated_content = content[:self.MAX_TEXT_LENGTH] if len(content) > self.MAX_TEXT_LENGTH else content
                 
                 # Markdown記法をクリーニング
                 read_content = clean_markdown_for_tts(truncated_content)
@@ -299,7 +320,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         os.unlink(temp_file_path)
-                    except OSError:
+                    except (OSError, PermissionError):
+                        # ファイル削除エラーは無視して継続
                         pass
             
             try:
@@ -336,7 +358,7 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                         if proc.poll() is None:
                             proc.terminate()
                             try:
-                                proc.wait(timeout=2)
+                                proc.wait(timeout=self.PROCESS_TERMINATION_TIMEOUT)
                             except subprocess.TimeoutExpired:
                                 proc.kill()
                         # キャンセル時も一時ファイルをクリーンアップ
@@ -345,7 +367,7 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     
                     # 短時間待機
                     import time
-                    time.sleep(0.1)
+                    time.sleep(self.CANCEL_CHECK_INTERVAL)
                 
                 # 再生完了
                 print(f"💾 音声ファイル: {temp_file_path}")
@@ -438,7 +460,7 @@ def main():
     event_handler = ClaudeResponseWatcher(args.watch_dir)
     
     # メイン実行時のみシグナル処理を設定
-    def graceful_shutdown(signum, _frame):
+    def graceful_shutdown(signum, _):
         print(f"\n🛑 シグナル {signum} を受信、正常終了中...")
         event_handler.cleanup()
         sys.exit(0)
