@@ -22,7 +22,7 @@ import mcp.types as types
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from lib import AivisCloudTTS, get_default_model, split_text_smart
+from aibis_cloud_tools import AivisCloudTTS, get_default_model, split_text_smart
 
 
 # Initialize TTS client

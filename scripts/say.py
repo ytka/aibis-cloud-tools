@@ -15,7 +15,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import requests
-from lib import AivisCloudTTS, load_env_file, split_text_smart, get_default_model
+from aibis_cloud_tools import AivisCloudTTS, load_env_file, split_text_smart, get_default_model
 
 
 def main():

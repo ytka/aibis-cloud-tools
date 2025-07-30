@@ -20,7 +20,7 @@ from watchdog.events import FileSystemEventHandler
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from lib import AivisCloudTTS, load_env_file, clean_markdown_for_tts, get_default_model
+from aibis_cloud_tools import AivisCloudTTS, load_env_file, clean_markdown_for_tts, get_default_model
 
 class ClaudeResponseWatcher(FileSystemEventHandler):
     def __init__(self, watch_dir, tts_script_path=None):
