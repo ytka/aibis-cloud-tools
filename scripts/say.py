@@ -44,7 +44,7 @@ def main():
                        help=f"音声合成モデルのUUID（デフォルト: {get_default_model()}）")
     parser.add_argument("--speaker-uuid", "-s", help="話者のUUID")
     parser.add_argument("--style-name", "-n", help="スタイル名（例: Happy, Sad）")
-    parser.add_argument("--format", "-f", default="mp3",
+    parser.add_argument("--format", "--fmt", default="mp3",
                        choices=["wav", "mp3", "flac", "aac", "opus"],
                        help="出力音声形式（デフォルト: mp3）")
     parser.add_argument("--rate", "-r", type=float, default=1.0,
@@ -77,6 +77,18 @@ def main():
     try:
         client = AivisCloudTTS(api_key)
 
+        # モデル一覧表示（テキスト不要のため最初にチェック）
+        if args.list_models:
+            print("利用可能な音声合成モデル:")
+            models = client.list_models(limit=20)
+            for model in models["aivm_models"]:
+                print(f"  UUID: {model['aivm_model_uuid']}")
+                print(f"  名前: {model['name']}")
+                print(f"  説明: {model['description']}")
+                print(f"  話者数: {len(model['speakers'])}")
+                print()
+            return
+
         # テキストの取得
         if args.file:
             try:
@@ -106,18 +118,6 @@ def main():
             print(f"📝 テキストを{len(text_chunks)}個のチャンクに分割しました（{args.max_chars}文字単位）")
             if args.split_pause > 0:
                 print(f"⏸️  分割間隔: {args.split_pause}秒")
-
-        # モデル一覧表示
-        if args.list_models:
-            print("利用可能な音声合成モデル:")
-            models = client.list_models(limit=20)
-            for model in models["aivm_models"]:
-                print(f"  UUID: {model['aivm_model_uuid']}")
-                print(f"  名前: {model['name']}")
-                print(f"  説明: {model['description']}")
-                print(f"  話者数: {len(model['speakers'])}")
-                print()
-            return
 
         # テキスト内容を表示（デバッグ用）
         print(f"合成対象テキスト（{len(text_content)}文字）:")
