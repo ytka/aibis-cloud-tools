@@ -7,7 +7,6 @@ Claude Code応答監視スクリプト（Aivis Cloud TTS統合版）
 import json
 import time
 import subprocess
-import shlex
 import os
 import sys
 import signal
@@ -23,22 +22,19 @@ sys.path.insert(0, str(project_root))
 from aibis_cloud_tools import AivisCloudTTS, load_env_file, clean_markdown_for_tts, get_default_model
 
 class ClaudeResponseWatcher(FileSystemEventHandler):
-    def __init__(self, watch_dir, tts_script_path=None):
+    def __init__(self, watch_dir):
         self.watch_dir = Path(watch_dir).expanduser()
         self.processed_lines = {}  # ファイルごとの処理済み行数
         
         # TTSプロセス管理
         self.current_tts_process = None
         self.process_lock = threading.Lock()
-        self.is_playing = False
         
         # クリーンアップ管理
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
         
         # TTS設定
-        self.use_direct_tts = True  # 直接ライブラリを使用
-        self.tts_script_path = self._find_tts_script(tts_script_path)  # フォールバック用
         self.tts_client = None
         
         # 既存ファイルの行数を初期化
@@ -47,72 +43,29 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         # ESCキー監視を開始
         self._start_esc_monitor()
     
-    def _find_tts_script(self, custom_path=None):
-        """TTSスクリプトのパスを自動検出または設定（フォールバック用）"""
-        if custom_path:
-            script_path = Path(custom_path).expanduser()
-            if script_path.exists():
-                return str(script_path)
-        
-        # プロジェクト内の相対パスで検索
-        script_dir = Path(__file__).parent
-        project_root = script_dir.parent
-        
-        # say.pyを直接検索
-        possible_paths = [
-            script_dir / "say.py",                        # 同じディレクトリ
-            project_root / "scripts" / "say.py",          # プロジェクトルート/scripts/
-        ]
-        
-        for tts_script in possible_paths:
-            if tts_script.exists():
-                return str(tts_script)
-        
-        return None
+    
+    def _has_active_tts_process(self):
+        """アクティブなTTSプロセスが存在するかチェック"""
+        return (self.current_tts_process and 
+                hasattr(self.current_tts_process, 'poll') and 
+                self.current_tts_process.poll() is None)
     
     def _kill_current_tts(self):
-        """現在のTTS再生を停止（子プロセスも含めて確実に終了）"""
+        """現在のTTSプロセスを終了（個別プロセスのみ）"""
         with self.process_lock:
-            # ライブラリ使用時の処理
-            if self.current_tts_process == "library_thread":
-                print("🛑 ライブラリTTS再生をキャンセルしています...")
-                self.is_playing = False
-                self.current_tts_process = None
-                print("🛑 ライブラリTTS再生をキャンセルしました")
-                return
-            
-            # 従来のプロセス終了処理
-            if self.current_tts_process and hasattr(self.current_tts_process, 'poll') and self.current_tts_process.poll() is None:
+            if self._has_active_tts_process():
+                print("🛑 TTS再生をキャンセルしています...")
                 try:
-                    if sys.platform == "win32":
-                        # Windows: プロセスを終了
-                        self.current_tts_process.terminate()
-                        try:
-                            self.current_tts_process.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            self.current_tts_process.kill()
-                    else:
-                        # Unix系: プロセスグループ全体を終了（uv runとその子プロセスを確実に終了）
-                        try:
-                            import signal
-                            pgid = os.getpgid(self.current_tts_process.pid)
-                            os.killpg(pgid, signal.SIGTERM)
-                            try:
-                                self.current_tts_process.wait(timeout=2)
-                            except subprocess.TimeoutExpired:
-                                os.killpg(pgid, signal.SIGKILL)
-                        except (OSError, ProcessLookupError):
-                            # プロセスグループがない場合は通常の終了を試行
-                            self.current_tts_process.terminate()
-                            try:
-                                self.current_tts_process.wait(timeout=2)
-                            except subprocess.TimeoutExpired:
-                                self.current_tts_process.kill()
+                    # プロセスグループではなく、個別プロセスのみを終了
+                    self.current_tts_process.terminate()
+                    try:
+                        self.current_tts_process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        self.current_tts_process.kill()
                     
-                    print("🛑 前の音声再生をキャンセルしました")
-                    self.is_playing = False
+                    print("🛑 音声再生をキャンセルしました")
                     
-                except (ProcessLookupError, OSError) as e:
+                except (ProcessLookupError, OSError):
                     # プロセスが既に終了している場合
                     pass
                 except Exception as e:
@@ -156,7 +109,7 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                             if char and ord(char) == 27:  # ESC = 0x1b = 27
                                 # エコーを手動で復元して出力
                                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-                                if self.is_playing:
+                                if self._has_active_tts_process():
                                     print("\n⌨️  ESCキー検出 - 音声をキャンセル中...")
                                     sys.stdout.flush()
                                     self._kill_current_tts()
@@ -248,8 +201,8 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
             print(f"💬 内容: {content[:100]}{'...' if len(content) > 100 else ''}")
             print("-" * 50)
             
-            # ここで任意のコマンドを実行
-            self.execute_custom_command(content, timestamp, session_id)
+            # Claude応答の音声読み上げ処理
+            self.handle_claude_response_tts(content, timestamp)
             
         except Exception as e:
             print(f"❌ Claude応答処理エラー: {e}")
@@ -280,12 +233,11 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         except Exception:
             return False
     
-    def execute_custom_command(self, content, timestamp, session_id):
-        """カスタムコマンドの実行（Aivis Cloud TTS読み上げ版）"""
+    def handle_claude_response_tts(self, content, timestamp):
+        """Claude応答の音声読み上げ処理"""
         try:
-            # 前の音声再生をキャンセル
-            if self.is_playing:
-                print("🛑 前の音声再生をキャンセルしています...")
+            # 前の音声再生をキャンセル（プロセス存在チェック）
+            if self._has_active_tts_process():
                 self._kill_current_tts()
             
             # ログファイルに記録
@@ -299,6 +251,13 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
             
             # 🔊 Aivis Cloud TTSで読み上げ
             try:
+                # APIキーの確認
+                api_key = os.getenv("AIVIS_API_KEY")
+                if not api_key:
+                    print("⚠️  AIVIS_API_KEYが設定されていないため、読み上げをスキップします")
+                    self._send_notification("Claude応答を検出しました（API KEY未設定）")
+                    return
+                
                 # 長すぎる場合は最初の2000文字のみ読み上げ（より安全なサイズ）
                 max_length = 2000
                 truncated_content = content[:max_length] if len(content) > max_length else content
@@ -306,31 +265,16 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 # Markdown記法をクリーニング
                 read_content = clean_markdown_for_tts(truncated_content)
                 
-                # 直接TTSライブラリを使用
-                if self._use_direct_tts():
-                    self._play_with_library(read_content)
-                elif self.tts_script_path:
-                    self._play_with_script(read_content)
-                else:
-                    print("⚠️  TTSが設定されていないため、読み上げをスキップします")
-                    self._send_notification("Claude応答を検出しました（TTS未設定）")
+                # TTSライブラリで読み上げ
+                self._play_with_library(read_content)
                     
             except Exception as tts_error:
                 print(f"⚠️  TTS読み上げエラー: {tts_error}")
-                self.is_playing = False
                 self._send_notification("TTS読み上げに失敗しました")
                 
         except Exception as e:
             print(f"❌ コマンド実行エラー: {e}")
-            self.is_playing = False
     
-    def _use_direct_tts(self):
-        """直接TTSライブラリを使用できるかチェック"""
-        try:
-            api_key = os.getenv("AIVIS_API_KEY")
-            return api_key is not None
-        except:
-            return False
     
     def _get_tts_client(self):
         """TTSクライアントを取得（キャッシュ付き）"""
@@ -342,29 +286,15 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         return self.tts_client
     
     def _play_with_library(self, text):
-        """ライブラリを直接使用して音声再生"""
-        with self.process_lock:
-            self.is_playing = True
-            # スレッドオブジェクトを current_tts_process として保存
-            # これにより _kill_current_tts() で適切に停止できる
-            self.current_tts_process = "library_thread"
-        
+        """ライブラリの非同期再生機能を使用して音声再生"""
         print(f"🔊 Aivis Cloud TTS（ライブラリ）で読み上げ開始: {text[:50]}...")
         
         def play_audio_thread():
+            temp_file_path = None
+            proc = None
             try:
-                # 開始時に再度チェック（キャンセルされていないか）
-                with self.process_lock:
-                    if not self.is_playing:
-                        return
-                
                 client = self._get_tts_client()
                 print(f"🔊 音声合成中... ({len(text)}文字)")
-                
-                # キャンセルチェック
-                with self.process_lock:
-                    if not self.is_playing:
-                        return
                 
                 audio_data = client.synthesize_speech(
                     text=text,
@@ -372,101 +302,58 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     volume=1.0
                 )
                 
-                # キャンセルチェック
-                with self.process_lock:
-                    if not self.is_playing:
-                        return
-                
                 print(f"🎵 音声再生中... ({len(audio_data)} bytes)")
-                temp_file = client.play_audio(audio_data)
                 
-                # 再生完了後の最終チェック
+                # 非同期再生でプロセスオブジェクトを取得
+                proc, temp_file_path = client.play_audio_async(audio_data)
+                
                 with self.process_lock:
-                    if self.is_playing:  # まだキャンセルされていない場合のみ完了メッセージ
-                        if temp_file:
-                            print(f"💾 音声ファイル: {temp_file}")
-                        print("✅ 音声再生が完了しました")
+                    self.current_tts_process = proc
+                
+                # プロセスの完了を監視（キャンセル可能）
+                while True:
+                    if proc.poll() is not None:
+                        # プロセス完了
+                        break
+                    
+                    # キャンセルチェック（短い間隔で）
+                    with self.process_lock:
+                        if self.current_tts_process != proc:
+                            # 別のプロセスに置き換えられた（キャンセルされた）場合
+                            if proc and proc.poll() is None:
+                                proc.terminate()
+                                try:
+                                    proc.wait(timeout=2)
+                                except subprocess.TimeoutExpired:
+                                    proc.kill()
+                            return
+                    
+                    # 短時間待機
+                    import time
+                    time.sleep(0.1)
+                
+                # 再生完了
+                print(f"💾 音声ファイル: {temp_file_path}")
+                print("✅ 音声再生が完了しました")
                         
             except Exception as e:
                 print(f"⚠️  ライブラリTTSエラー: {e}")
             finally:
+                # 一時ファイルのクリーンアップ
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.unlink(temp_file_path)
+                    except OSError:
+                        pass
+                
                 with self.process_lock:
-                    self.is_playing = False
-                    self.current_tts_process = None
+                    if self.current_tts_process == proc:
+                        self.current_tts_process = None
         
         # バックグラウンドで再生
         audio_thread = threading.Thread(target=play_audio_thread, daemon=True)
-        # スレッドオブジェクトを保存（将来的な拡張用）
-        with self.process_lock:
-            self.current_audio_thread = audio_thread
         audio_thread.start()
     
-    def _play_with_script(self, text):
-        """スクリプト経由で音声再生（フォールバック）"""
-        script_dir = Path(__file__).parent
-        project_root = script_dir.parent
-        
-        cmd = [
-            "uv", "run", 
-            "--directory", str(project_root),
-            self.tts_script_path,
-            "--text", text
-        ]
-        
-        # 環境変数をコピー
-        env = os.environ.copy()
-        
-        # プロセス管理情報を更新
-        with self.process_lock:
-            self.is_playing = True
-            
-            # 新しいプロセスグループで実行（子プロセスを確実に終了させるため）
-            if sys.platform == "win32":
-                # Windows: CREATE_NEW_PROCESS_GROUP フラグを使用
-                self.current_tts_process = subprocess.Popen(
-                    cmd, 
-                    stdout=subprocess.DEVNULL, 
-                    stderr=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                    env=env
-                )
-            else:
-                # Unix系: 新しいプロセスグループを作成
-                self.current_tts_process = subprocess.Popen(
-                    cmd, 
-                    stdout=subprocess.DEVNULL, 
-                    stderr=subprocess.DEVNULL,
-                    preexec_fn=os.setsid,
-                    env=env
-                )
-        
-        print(f"🔊 Aivis Cloud TTS（スクリプト）で読み上げ開始: {text[:50]}...")
-        print(f"🔧 実行コマンド: {' '.join(shlex.quote(arg) for arg in cmd)}")
-        if sys.stdin.isatty():
-            print("⌨️  ESCキーでキャンセル可能")
-        
-        # バックグラウンドでプロセス完了を監視
-        threading.Thread(target=self._monitor_tts_process, daemon=True).start()
-    
-    def _monitor_tts_process(self):
-        """TTSプロセスの完了を監視するバックグラウンドスレッド"""
-        try:
-            if self.current_tts_process:
-                # プロセスの完了を待機
-                self.current_tts_process.wait()
-                
-                # プロセス管理状態をクリア
-                with self.process_lock:
-                    self.is_playing = False
-                    self.current_tts_process = None
-                
-                print("✅ 音声再生が完了しました")
-                
-        except Exception as e:
-            print(f"⚠️  プロセス監視エラー: {e}")
-            with self.process_lock:
-                self.is_playing = False
-                self.current_tts_process = None
     
     
     def cleanup(self):
@@ -525,14 +412,6 @@ def main():
         help=f"監視するディレクトリ（環境変数: CLAUDE_WATCH_DIR、デフォルト: {default_watch_dir}）"
     )
     
-    # デフォルトTTSスクリプト（自動検出）
-    default_tts_script = None
-    
-    parser.add_argument(
-        "--tts-script",
-        default=default_tts_script,
-        help="使用するTTSスクリプトのパス（フォールバック用、通常はライブラリを直接使用）"
-    )
     
     args = parser.parse_args()
     
@@ -545,10 +424,10 @@ def main():
         return 1
     
     # イベントハンドラーの初期化
-    event_handler = ClaudeResponseWatcher(args.watch_dir, args.tts_script)
+    event_handler = ClaudeResponseWatcher(args.watch_dir)
     
     # メイン実行時のみシグナル処理を設定
-    def graceful_shutdown(signum, frame):
+    def graceful_shutdown(signum, _frame):
         print(f"\n🛑 シグナル {signum} を受信、正常終了中...")
         event_handler.cleanup()
         sys.exit(0)
@@ -557,13 +436,12 @@ def main():
     signal.signal(signal.SIGTERM, graceful_shutdown)  # 終了シグナル
     
     # TTS設定の確認
-    if event_handler._use_direct_tts():
-        print("🔊 TTS: ライブラリ直接使用（推奨）")
-    elif event_handler.tts_script_path:
-        print(f"🔊 TTSスクリプト（フォールバック）: {event_handler.tts_script_path}")
+    api_key = os.getenv("AIVIS_API_KEY")
+    if api_key:
+        print("🔊 TTS: Aivis Cloud ライブラリ使用")
     else:
         print("⚠️  TTSが設定されていません。通知のみ行います。")
-        print("💡 AIVIS_API_KEY環境変数を設定するか、--tts-script オプションでsay.pyのパスを指定してください")
+        print("💡 AIVIS_API_KEY環境変数を設定してください")
     
     print(f"👁️  Claude応答監視を開始します...")
     print(f"📂 監視ディレクトリ: {watch_path}")

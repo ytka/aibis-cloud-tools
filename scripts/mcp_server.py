@@ -159,10 +159,25 @@ async def handle_call_tool(
                     volume=segment["volume"]
                 )
                 
-                # Play audio using the TTS client
+                # Play audio using the TTS client (非同期再生)
                 try:
-                    tts_client.play_audio(audio_data, "mp3")
-                    play_result = {"status": "completed", "message": "Audio playback completed"}
+                    proc, temp_file = tts_client.play_audio_async(audio_data, "mp3")
+                    try:
+                        proc.wait()  # プロセス完了を待機
+                        play_result = {"status": "completed", "message": "Audio playback completed"}
+                    except Exception as wait_error:
+                        play_result = {
+                            "status": "error", 
+                            "message": f"Audio playback wait failed: {str(wait_error)}",
+                            "audio_size": len(audio_data)
+                        }
+                    finally:
+                        # 一時ファイルのクリーンアップ
+                        if temp_file and os.path.exists(temp_file):
+                            try:
+                                os.unlink(temp_file)
+                            except OSError:
+                                pass
                 except Exception as e:
                     play_result = {
                         "status": "error", 

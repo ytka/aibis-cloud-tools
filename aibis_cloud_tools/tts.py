@@ -364,3 +364,82 @@ class AivisCloudTTS:
                 pass
 
         return None
+
+    def play_audio_async(self, audio_data: bytes, output_format: str = "mp3"):
+        """
+        音声データを非同期再生（プロセスオブジェクトを返す）
+        
+        Args:
+            audio_data: 音声データ
+            output_format: 音声形式
+            
+        Returns:
+            tuple: (subprocess.Popen, temp_file_path) プロセスオブジェクトと一時ファイルパス
+        """
+        # 一時ファイルに音声データを保存
+        file_extension = output_format
+        if output_format == "opus":
+            file_extension = "ogg"
+
+        with tempfile.NamedTemporaryFile(suffix=f".{file_extension}", delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_file_path = temp_file.name
+
+        # プラットフォーム別にプロセスを開始（待機しない）
+        proc = None
+        try:
+            # macOSの場合はafplayを使用
+            if sys.platform == "darwin":
+                proc = subprocess.Popen(["afplay", temp_file_path])
+            # Linuxの場合はplayやaplayを試行
+            elif sys.platform == "linux":
+                try:
+                    proc = subprocess.Popen(["play", temp_file_path])
+                except FileNotFoundError:
+                    proc = subprocess.Popen(["aplay", temp_file_path])
+            # Windowsの場合
+            elif sys.platform == "win32":
+                # Windowsでは非同期再生が複雑なため、従来の方法にフォールバック
+                import winsound
+                import threading
+                
+                def play_windows_audio():
+                    winsound.PlaySound(temp_file_path, winsound.SND_FILENAME)
+                
+                thread = threading.Thread(target=play_windows_audio, daemon=True)
+                thread.start()
+                
+                # スレッドオブジェクトを疑似プロセスとして返す
+                class WindowsAudioProcess:
+                    def __init__(self, thread):
+                        self.thread = thread
+                    
+                    def poll(self):
+                        return None if self.thread.is_alive() else 0
+                    
+                    def wait(self, timeout=None):
+                        self.thread.join(timeout)
+                        return 0
+                    
+                    def terminate(self):
+                        # Windowsの場合は終了処理は制限的
+                        pass
+                    
+                    def kill(self):
+                        # Windowsの場合は終了処理は制限的
+                        pass
+                
+                proc = WindowsAudioProcess(thread)
+            else:
+                # サポートされていないプラットフォーム
+                raise Exception(f"Unsupported platform: {sys.platform}")
+                
+        except Exception as e:
+            # プロセス開始に失敗した場合は一時ファイルを削除
+            try:
+                os.unlink(temp_file_path)
+            except OSError:
+                pass
+            raise e
+
+        return proc, temp_file_path
