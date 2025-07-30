@@ -5,6 +5,7 @@ Aivis Cloud TTS MCP Server using official MCP framework
 
 import asyncio
 import os
+import signal
 import subprocess
 import tempfile
 import sys
@@ -283,6 +284,14 @@ async def handle_call_tool(
 
 async def main():
     """Main entry point"""
+    # メイン実行時のみシグナル処理を設定
+    def graceful_shutdown(signum, frame):
+        print(f"\n🛑 シグナル {signum} を受信、MCP Server正常終了中...")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, graceful_shutdown)   # Ctrl-C
+    signal.signal(signal.SIGTERM, graceful_shutdown)  # 終了シグナル
+    
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
@@ -299,4 +308,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n🛑 MCP Server終了")
+        sys.exit(0)
