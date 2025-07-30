@@ -342,12 +342,16 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         def play_audio_thread():
             try:
                 client = self._get_tts_client()
+                print(f"🔊 音声合成中... ({len(text)}文字)")
                 audio_data = client.synthesize_speech(
                     text=text,
                     model_uuid=get_default_model(),
                     volume=1.0
                 )
-                client.play_audio(audio_data)
+                print(f"🎵 音声再生中... ({len(audio_data)} bytes)")
+                temp_file = client.play_audio(audio_data)
+                if temp_file:
+                    print(f"💾 音声ファイル: {temp_file}")
                 print("✅ 音声再生が完了しました")
             except Exception as e:
                 print(f"⚠️  ライブラリTTSエラー: {e}")

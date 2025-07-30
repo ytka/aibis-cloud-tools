@@ -130,6 +130,7 @@ def main():
             
             if args.realtime and not args.no_play:
                 # リアルタイムストリーミング再生
+                print(f"🔊 [{i}/{len(text_chunks)}] リアルタイム再生中...")
                 audio_data = client.synthesize_and_stream(
                     text=chunk_text,
                     model_uuid=args.model_uuid,
@@ -143,6 +144,7 @@ def main():
                     enable_realtime_play=True,
                     no_wait=args.no_wait
                 )
+                print(f"✅ リアルタイム再生完了（{len(audio_data)} bytes）")
             else:
                 # 従来の方式（全データ受信後に再生）
                 audio_data = client.synthesize_speech(
@@ -165,6 +167,7 @@ def main():
                     temp_file = client.play_audio(audio_data, args.format)
                     if temp_file:
                         print(f"音声ファイル: {temp_file}")
+                    print(f"✅ 音声再生完了")
             
             # 分割間の一時停止（最後のチャンクでない場合）
             if i < len(text_chunks) and args.split_pause > 0:
@@ -175,7 +178,7 @@ def main():
         if args.save_file and not args.realtime and total_audio_data:
             with open(args.save_file, "wb") as f:
                 f.write(total_audio_data)
-            print(f"音声ファイルを保存しました: {args.save_file} ({len(total_audio_data)} bytes)")
+            print(f"💾 音声ファイルを保存しました: {args.save_file} ({len(total_audio_data)} bytes)")
 
         print("完了")
 
