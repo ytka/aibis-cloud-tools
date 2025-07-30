@@ -9,6 +9,7 @@ import signal
 import subprocess
 import tempfile
 import sys
+from pathlib import Path
 from typing import Optional, Any
 
 import requests
@@ -17,117 +18,25 @@ from mcp.server.models import InitializationOptions
 import mcp.server.stdio
 import mcp.types as types
 
+# Import the AivisCloudTTS class from src/aivis-cloud-tts.py
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+import importlib.util
+spec = importlib.util.spec_from_file_location("aivis_cloud_tts", Path(__file__).parent.parent / "src" / "aivis-cloud-tts.py")
+aivis_cloud_tts = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(aivis_cloud_tts)
 
-# TTS functions
-def get_headers() -> dict:
-    """Get API headers"""
+AivisCloudTTS = aivis_cloud_tts.AivisCloudTTS
+get_default_model = aivis_cloud_tts.get_default_model
+split_text_smart = aivis_cloud_tts.split_text_smart
+
+
+# Initialize TTS client
+def get_tts_client() -> AivisCloudTTS:
+    """Get TTS client instance"""
     api_key = os.getenv("AIVIS_API_KEY", "")
     if not api_key:
         raise ValueError("AIVIS_API_KEY environment variable is required")
-    
-    return {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-
-def synthesize_speech(
-    text: str, 
-    model_uuid: Optional[str] = None, 
-    emotional_intensity: float = 1.0, 
-    volume: float = 1.0
-) -> bytes:
-    """Synthesize speech from text"""
-    url = "https://api.aivis-project.com/v1/tts/synthesize"
-    default_model_uuid = "a59cb814-0083-4369-8542-f51a29e72af7"
-    
-    payload = {
-        "model_uuid": model_uuid or default_model_uuid,
-        "text": text,
-        "use_ssml": True,
-        "output_format": "mp3",
-        "emotional_intensity": emotional_intensity,
-        "volume": volume
-    }
-    
-    response = requests.post(url, headers=get_headers(), json=payload, stream=True, timeout=30)
-    response.raise_for_status()
-    
-    audio_data = b""
-    for chunk in response.iter_content(chunk_size=8192):
-        if chunk:
-            audio_data += chunk
-    
-    # Validate audio data
-    if len(audio_data) == 0:
-        raise ValueError("Received empty audio data from API")
-    
-    # Check if it looks like valid audio data (MP3 should start with specific bytes)
-    if not audio_data.startswith(b'\xff\xfb') and not audio_data.startswith(b'\xff\xf3') and not audio_data.startswith(b'ID3'):
-        raise ValueError(f"Audio data doesn't appear to be valid MP3 format (starts with: {audio_data[:10].hex()})")
-    
-    return audio_data
-
-
-def play_audio(audio_data: bytes) -> dict:
-    """Play audio synchronously"""
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
-        temp_file.write(audio_data)
-        temp_file_path = temp_file.name
-    
-    try:
-        if sys.platform == "darwin":
-            # macOS - use afplay with better error handling
-            result = subprocess.run(
-                ["afplay", temp_file_path], 
-                check=False,  # Don't raise exception immediately
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                # Try to get more details about the error
-                error_msg = f"afplay failed with return code {result.returncode}"
-                if result.stderr:
-                    error_msg += f": {result.stderr.strip()}"
-                if result.stdout:
-                    error_msg += f" (stdout: {result.stdout.strip()})"
-                
-                # Check if file exists and has content
-                file_size = os.path.getsize(temp_file_path) if os.path.exists(temp_file_path) else 0
-                error_msg += f" (audio file size: {file_size} bytes)"
-                
-                raise subprocess.CalledProcessError(result.returncode, "afplay", error_msg)
-                
-        elif sys.platform == "linux":
-            try:
-                result = subprocess.run(["play", temp_file_path], check=False, capture_output=True, text=True)
-                if result.returncode != 0:
-                    raise subprocess.CalledProcessError(result.returncode, "play", result.stderr)
-            except FileNotFoundError:
-                result = subprocess.run(["aplay", temp_file_path], check=False, capture_output=True, text=True)
-                if result.returncode != 0:
-                    raise subprocess.CalledProcessError(result.returncode, "aplay", result.stderr)
-                    
-        elif sys.platform == "win32":
-            import winsound
-            winsound.PlaySound(temp_file_path, winsound.SND_FILENAME)
-        
-        return {"status": "completed", "message": "Audio playback completed"}
-    
-    except Exception as e:
-        # Return error details instead of raising
-        return {
-            "status": "error", 
-            "message": f"Audio playback failed: {str(e)}",
-            "audio_size": len(audio_data),
-            "temp_file": temp_file_path
-        }
-    
-    finally:
-        try:
-            os.unlink(temp_file_path)
-        except OSError:
-            pass
+    return AivisCloudTTS(api_key)
 
 
 # MCP Server setup
@@ -246,14 +155,25 @@ async def handle_call_tool(
                 if not segment["text"]:
                     continue
                 
-                # Synthesize and play audio for this segment
-                audio_data = synthesize_speech(
-                    segment["text"], 
-                    segment["model_uuid"], 
-                    segment["emotional_intensity"], 
-                    segment["volume"]
+                # Synthesize and play audio for this segment using AivisCloudTTS
+                tts_client = get_tts_client()
+                audio_data = tts_client.synthesize_speech(
+                    text=segment["text"],
+                    model_uuid=segment["model_uuid"] or get_default_model(),
+                    emotional_intensity=segment["emotional_intensity"],
+                    volume=segment["volume"]
                 )
-                play_result = play_audio(audio_data)
+                
+                # Play audio using the TTS client
+                try:
+                    tts_client.play_audio(audio_data, "mp3")
+                    play_result = {"status": "completed", "message": "Audio playback completed"}
+                except Exception as e:
+                    play_result = {
+                        "status": "error", 
+                        "message": f"Audio playback failed: {str(e)}",
+                        "audio_size": len(audio_data)
+                    }
                 
                 segment_result = {
                     "segment": i,
