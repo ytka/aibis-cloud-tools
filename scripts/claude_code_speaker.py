@@ -16,6 +16,12 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+# プロジェクトルートをPythonパスに追加
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from lib.utils import load_env_file, clean_markdown_for_tts
+
 class ClaudeResponseWatcher(FileSystemEventHandler):
     def __init__(self, watch_dir, tts_script_path=None):
         self.watch_dir = Path(watch_dir).expanduser()
@@ -50,18 +56,17 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         script_dir = Path(__file__).parent
         project_root = script_dir.parent
         
-        # aivis-cloud-tts.pyを直接検索
+        # say.pyを直接検索
         possible_paths = [
-            project_root / "src" / "aivis-cloud-tts.py",  # プロジェクトルート/src/
-            script_dir / "aivis-cloud-tts.py",            # 同じディレクトリ
-            project_root / "aivis-cloud-tts.py",          # プロジェクトルート直下
+            script_dir / "say.py",                        # 同じディレクトリ
+            project_root / "scripts" / "say.py",          # プロジェクトルート/scripts/
         ]
         
         for tts_script in possible_paths:
             if tts_script.exists():
                 return str(tts_script)
         
-        print("⚠️  aivis-cloud-tts.pyが見つかりません。--tts-script オプションで指定してください。")
+        print("⚠️  say.pyが見つかりません。--tts-script オプションで指定してください。")
         return None
     
     def _kill_current_tts(self):
@@ -290,9 +295,9 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                     truncated_content = content[:max_length] if len(content) > max_length else content
                     
                     # Markdown記法をクリーニング
-                    read_content = self._clean_markdown_for_tts(truncated_content)
+                    read_content = clean_markdown_for_tts(truncated_content)
                     
-                    # aivis-cloud-tts.pyを直接実行（uv runで）
+                    # say.pyを直接実行（uv runで）
                     script_dir = Path(__file__).parent
                     project_root = script_dir.parent
                     
@@ -370,43 +375,6 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
                 self.is_playing = False
                 self.current_tts_process = None
     
-    def _clean_markdown_for_tts(self, text):
-        """Markdown記法をTTS読み上げ用にクリーニング"""
-        import re
-        
-        # ヘッダー記号の処理（# ## ### など）
-        text = re.sub(r'^#{1,6}\s*(.+)$', r'\1', text, flags=re.MULTILINE)
-        
-        # 強調記号の削除
-        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **bold**
-        text = re.sub(r'__(.*?)__', r'\1', text)      # __bold__
-        text = re.sub(r'(?<!\*)\*([^\*\n]+?)\*(?!\*)', r'\1', text)  # *italic* (not part of **)
-        text = re.sub(r'(?<!_)_([^_\n]+?)_(?!_)', r'\1', text)        # _italic_ (not part of __)
-        
-        # コードブロックの処理（先に処理）
-        text = re.sub(r'```[\s\S]*?```', 'コード例', text)  # ```code blocks```
-        text = re.sub(r'`([^`\n]*)`', r'\1', text)      # `inline code`
-        
-        # リンク記法の処理
-        text = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', text)  # [text](url) → text
-        
-        # リスト記号の処理
-        text = re.sub(r'^[\s]*[-\*\+]\s*(.+)$', r'・\1', text, flags=re.MULTILINE)
-        
-        # 引用記号の削除
-        text = re.sub(r'^>\s*(.+)$', r'\1', text, flags=re.MULTILINE)
-        
-        # テーブル区切りの処理
-        text = text.replace('|', '、')
-        
-        # 複数の改行を整理
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        
-        # 特殊文字の処理
-        text = text.replace('---', '区切り線')
-        text = text.replace('***', '区切り線')
-        
-        return text.strip()
     
     def cleanup(self):
         """後処理 - 現在のTTSプロセスを停止"""
@@ -422,24 +390,6 @@ class ClaudeResponseWatcher(FileSystemEventHandler):
         """通知メッセージを標準エラー出力に送信"""
         print(f"🔔 {message}", file=sys.stderr, flush=True)
 
-def load_env_file():
-    """プロジェクトルートの.envファイルを読み込む"""
-    script_dir = Path(__file__).parent
-    project_root = script_dir.parent
-    env_file = project_root / ".env"
-    
-    if env_file.exists():
-        try:
-            with open(env_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
-                        # 環境変数が未設定の場合のみ設定
-                        if key.strip() not in os.environ:
-                            os.environ[key.strip()] = value.strip()
-        except Exception as e:
-            print(f"⚠️  .envファイル読み込みエラー: {e}")
 
 def main():
     """メイン関数"""
@@ -454,13 +404,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用例:
-  python claude-code-speaker.py                                           # デフォルト設定で実行
-  python claude-code-speaker.py --tts-script ./src/aivis-cloud-tts.py     # カスタムTTSスクリプト指定
-  python claude-code-speaker.py --watch-dir ~/.claude/sessions            # カスタム監視ディレクトリ指定
+  python claude_code_speaker.py                                           # デフォルト設定で実行
+  python claude_code_speaker.py --tts-script ./scripts/say.py             # カスタムTTSスクリプト指定
+  python claude_code_speaker.py --watch-dir ~/.claude/sessions            # カスタム監視ディレクトリ指定
 
 環境変数での設定:
   export CLAUDE_WATCH_DIR="~/.claude/projects"                            # 監視ディレクトリ
-  python claude-code-speaker.py                                           # 環境変数で設定して実行
+  python claude_code_speaker.py                                           # 環境変数で設定して実行
         """
     )
     
@@ -518,7 +468,7 @@ def main():
         print(f"🔊 TTSスクリプト: {event_handler.tts_script_path}")
     else:
         print("⚠️  TTSスクリプトが見つかりません。通知のみ行います。")
-        print("💡 --tts-script オプションでaivis-cloud-tts.pyのパスを指定してください")
+        print("💡 --tts-script オプションでsay.pyのパスを指定してください")
     
     print(f"👁️  Claude応答監視を開始します...")
     print(f"📂 監視ディレクトリ: {watch_path}")

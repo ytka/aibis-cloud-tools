@@ -18,16 +18,11 @@ from mcp.server.models import InitializationOptions
 import mcp.server.stdio
 import mcp.types as types
 
-# Import the AivisCloudTTS class from src/aivis-cloud-tts.py
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-import importlib.util
-spec = importlib.util.spec_from_file_location("aivis_cloud_tts", Path(__file__).parent.parent / "src" / "aivis-cloud-tts.py")
-aivis_cloud_tts = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(aivis_cloud_tts)
+# プロジェクトルートをPythonパスに追加
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-AivisCloudTTS = aivis_cloud_tts.AivisCloudTTS
-get_default_model = aivis_cloud_tts.get_default_model
-split_text_smart = aivis_cloud_tts.split_text_smart
+from lib import AivisCloudTTS, get_default_model, split_text_smart
 
 
 # Initialize TTS client
