@@ -22,6 +22,9 @@ def load_env_file():
                     line = line.strip()
                     if line and not line.startswith('#') and '=' in line:
                         key, value = line.split('=', 1)
+                        # 値の末尾のコメントを削除（# より前の部分のみ使用）
+                        if '#' in value:
+                            value = value.split('#')[0].strip()
                         # 環境変数が未設定の場合のみ設定
                         if key.strip() not in os.environ:
                             os.environ[key.strip()] = value.strip()
@@ -88,8 +91,9 @@ def split_text_smart(text, max_chars=3000):
 
 def get_default_model():
     """デフォルトの音声合成モデルUUIDを返す"""
-    # openapi.json の例で使用されているモデル
-    return "a59cb814-0083-4369-8542-f51a29e72af7"
+    # 環境変数から取得、設定されていない場合はデフォルト値を使用
+    default_uuid = os.getenv("AIVIS_DEFAULT_MODEL_UUID", "a59cb814-0083-4369-8542-f51a29e72af7")
+    return default_uuid
 
 
 def clean_markdown_for_tts(text):

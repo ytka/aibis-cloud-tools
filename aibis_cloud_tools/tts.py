@@ -73,6 +73,9 @@ class AivisCloudTTS:
         Returns:
             合成された音声データ
         """
+        # デバッグ情報として使用中のmodel_uuidを出力
+        print(f"🎤 使用音声モデル: {model_uuid}")
+        
         url = f"{self.base_url}/tts/synthesize"
 
         payload = {
